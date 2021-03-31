@@ -1,4 +1,4 @@
-# Backend GameRoom Service
+# Laplace-Entangled-Environment
 A out of the box backend service for games to create a client-based multiplayer game. Write the code once then spread it to other players without much knowledge of networking. 
 
 ## Setting Up The Project
