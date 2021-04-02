@@ -1,23 +1,82 @@
 package main
 
 import (
+	"encoding/asn1"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 )
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Request Definitions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// third and fourth bytes of a request
+// Establish which endpoint/action the request is for
 type ClientCmd int64
-type CommandResponse struct {
-	data        interface{}
-	digest      func(interface{}) ([]byte, error)
-	raw         []byte
-	useRaw      bool
-	serverError error
+
+// First four bytes of a request.
+type RequestPrefix struct {
+	IsEncoded bool
+	IsJSON    bool
+	Command   ClientCmd
 }
 
-type SuccessfulData struct {
-	successful bool
-	err        string
+// Command is synonymous to a request body
+/*
+ * This represents the typical params found in most
+ * requests that require arugments
+ */
+
+type RequestHeader struct {
+	// Who the Command is From
+	UserID string
+
+	// Request Signature for Authentication
+	Sig string
+
+	// The Byte Index in Data for the Start of Body
+	bodyStart uint64
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Response Definitions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Abstracted Response Information from a Command
+type CommandResponse struct {
+	// Data to be Digested
+	Data interface{}
+
+	// Digesting method for Data Field
+	Digest func(interface{}) ([]byte, error)
+
+	// Raw Data to be written without Digest
+	Raw []byte
+
+	// Response with Data + Digest or use Raw Field
+	UseRaw bool
+
+	// Server Error to be Logged, rejecting request.
+	ServerError error
+}
+
+// Data Interface for CommandResponse Example.
+// Very typical for non-reading commands
+type SuccessfulData struct {
+	Successful bool
+	Err        string
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Command Switch
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /* Commands will be 2 byte codes */
 const (
@@ -47,6 +106,7 @@ const (
 	cmdGameCreate //     //0000_0010_0000_0000
 	cmdGameJoin   //     //0000_0010_0000_0001
 	cmdGameLeave  //     //0000_0010_0000_0010
+	cmdGameDelete //     //0000_0010_0000_0011
 	//                   //=====================
 )
 
@@ -62,30 +122,53 @@ var commandMap map[int64]ClientCmd = map[int64]ClientCmd{
 	1<<9 + 0: cmdGameCreate,
 	1<<9 + 1: cmdGameJoin,
 	1<<9 + 2: cmdGameLeave,
+	1<<9 + 3: cmdGameDelete,
 }
 
-func parseCommand(data []byte) (ClientCmd, error) {
-	var cmd int64 = int64(data[0])
-	cmd = (cmd << 8) + int64(data[1])
+func parseRequestPrefix(data []byte) (RequestPrefix, error) {
+	isEncoded := data[0] != byte(0)
+
+	// Capitalize Byte
+	data[1] = data[1] & 0b1101_1111
+
+	isJson := data[1] == byte('J')
+	if !isJson && data[1] != byte('A') {
+		return RequestPrefix{}, errors.New("Invalid Command")
+	}
+
+	var cmd int64 = int64(data[2])
+	cmd = (cmd << 8) + int64(data[3])
 
 	result, exists := commandMap[cmd]
 
 	if exists == false {
-		return cmdObserve, errors.New("Invalid Command")
+		return RequestPrefix{}, errors.New("Invalid Command")
 	}
 
-	return result, nil
+	return RequestPrefix{isEncoded, isJson, result}, nil
 }
 
-// TODO: Something to consider, we may want to pass the Arguments into this function as an interface
-func switchOnCommand(cmd ClientCmd, clientConn ClientConn, data []byte) ([]byte, error) {
+func parseRequestHeader(prefix RequestPrefix, data []byte) (RequestHeader, error) {
+	var header RequestHeader
+	var err error
+
+	if prefix.IsJSON {
+		header, err = decodeJsonHeader(data)
+		return header, err
+	} else {
+		header, err = decodeASN1Header(data)
+		return header, err
+	}
+}
+
+func switchOnCommand(prefix RequestPrefix, header RequestHeader, clientConn ClientConn, body []byte) ([]byte, error) {
 	var res CommandResponse
 
-	if needsSecurity(cmd) && !clientConn.isSecured {
+	if needsSecurity(prefix.Command) && !clientConn.isSecured {
 		return newErrorJson("Unsecure Connection!"), nil
 	}
 
-	switch cmd {
+	switch prefix.Command {
 	// Empty Commands
 	case cmdEmpty:
 		res = successfulResponse()
@@ -93,99 +176,146 @@ func switchOnCommand(cmd ClientCmd, clientConn ClientConn, data []byte) ([]byte,
 
 	// TLS Commands
 	case cmdRegister:
-		res = register(data)
+		res = register(body)
 		break
 
 	case cmdNewToken:
-		res = login(data)
+		res = login(body)
 		break
 
 	// cmdStartTLS is an exception to this switch statement. (It occurs in main.go)
 
 	// Through Commands (To Third Party)
 	case cmdAction:
-		res = applyAction(data)
+		res = applyAction(prefix, header, body)
 		break
 
 	case cmdObserve:
-		res = getGameData(data)
+		res = getGameData(prefix, header, body)
 		break
 
 	// User Management Commands
 	case cmdGetUserByUsername:
-		res = getUserByUsername(data)
+		res = getUserByUsername(prefix, header, body)
 		break
 
 	// Game Management Commands
 	case cmdGameCreate:
-		res = createGame(data)
+		res = createGame(prefix, header, body)
 		break
 
 	case cmdGameJoin:
-		res = joinGame(data)
+		res = joinGame(prefix, header, body)
 		break
 
 	case cmdGameLeave:
-		res = leaveGame(data)
+		res = leaveGame(prefix, header, body)
 		break
 
 	default:
 		return nil, errors.New("Command is Not Defined!")
 	}
 
-	if res.serverError != nil {
-		return nil, res.serverError
-	} else if res.useRaw {
-		return res.raw, nil
+	if res.ServerError != nil {
+		return nil, res.ServerError
+	} else if res.UseRaw {
+		return res.Raw, nil
 	}
 
-	return res.digest(res.data)
+	return res.Digest(res.Data)
 
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Utility Encoding Functions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+func base64Decode(data []byte) ([]byte, error) {
+	res := make([]byte, base64.StdEncoding.DecodedLen(len(data)))
+	_, err := base64.StdEncoding.Decode(data, res)
+	return res, err
+}
+
+func decodeJsonHeader(data []byte) (RequestHeader, error) {
+	res := RequestHeader{}
+	err := json.Unmarshal(data, &res)
+	if err != nil {
+		return res, err
+	}
+
+	var counter int
+	length := len(data)
+	for counter = 0; counter < length; counter += 1 {
+		if data[counter] == byte('}') {
+			break
+		}
+	}
+
+	return res, nil
+}
+
+func decodeASN1Header(data []byte) (RequestHeader, error) {
+	res := RequestHeader{}
+	body, err := asn1.Unmarshal(data, &res)
+	if err != nil {
+		return res, err
+	}
+
+	res.bodyStart = uint64(len(data) - len(body))
+
+	return res, nil
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Utility Response Functions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 func respWithError(err error) CommandResponse {
-	return CommandResponse{serverError: err}
+	return CommandResponse{ServerError: err}
 }
 
 func unSuccessfulResponseError(err error) CommandResponse {
 	return CommandResponse{
-		data:   SuccessfulData{false, err.Error()},
-		digest: json.Marshal,
+		Data:   SuccessfulData{false, err.Error()},
+		Digest: json.Marshal,
 	}
 }
 
 func unSuccessfulResponse(err string) CommandResponse {
 	return CommandResponse{
-		data:   SuccessfulData{false, err},
-		digest: json.Marshal,
+		Data:   SuccessfulData{false, err},
+		Digest: json.Marshal,
 	}
 }
 
 func successfulResponse() CommandResponse {
 	return CommandResponse{
-		data:   SuccessfulData{successful: true},
-		digest: json.Marshal,
+		Data:   SuccessfulData{Successful: true},
+		Digest: json.Marshal,
 	}
 }
 
 func rawSuccessfulResponseBytes(msg []byte) CommandResponse {
 	return CommandResponse{
-		useRaw: true,
-		raw:    msg,
+		UseRaw: true,
+		Raw:    msg,
 	}
 }
 
 // msg should not be a constant string!
 func rawSuccessfulResponse(msg string) CommandResponse {
 	return CommandResponse{
-		useRaw: true,
-		raw:    []byte(msg),
+		UseRaw: true,
+		Raw:    []byte(msg),
 	}
 }
 
 func rawUnsuccessfulResponse(err string) CommandResponse {
 	return CommandResponse{
-		useRaw: true,
-		raw:    []byte(err),
+		UseRaw: true,
+		Raw:    []byte(err),
 	}
 }

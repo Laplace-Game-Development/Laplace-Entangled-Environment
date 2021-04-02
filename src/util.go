@@ -7,7 +7,7 @@ func clear(data []byte) {
 }
 
 func newErrorJson(str string) []byte {
-	return []byte("{error: '" + str + "'}")
+	return []byte("{\"error\": \"" + str + "\"}")
 }
 
 func strTokWithEscape(seperator []byte, escape []byte, str []byte, start uint) ([]byte, uint) {

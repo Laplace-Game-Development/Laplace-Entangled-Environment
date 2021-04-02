@@ -40,20 +40,20 @@ func roomsSystemCleanup() {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 type GameWelcomeData struct {
-	id         string
-	numPlayers uint16
-	data       string
+	Id         string
+	NumPlayers uint16 `json:",string"`
+	Data       string
 }
 
 // For Static game details
 type GameMetadata struct {
-	id        string
-	owner     string
-	createdAt int64
-	lastUsed  int64
+	Id        string
+	Owner     string
+	CreatedAt int64 `json:",string"`
+	LastUsed  int64 `json:",string"`
 }
 
-func createGame(data []byte) CommandResponse {
+func createGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	// Get Auth ID from data
 	var authID string = "1"
 	var atomicClockValue int64
@@ -66,8 +66,8 @@ func createGame(data []byte) CommandResponse {
 		return respWithError(err)
 	} else if !canCreateGame {
 		return CommandResponse{
-			data:   GameMetadata{id: "", owner: "", createdAt: 0},
-			digest: json.Marshal,
+			Data:   GameMetadata{Id: "", Owner: "", CreatedAt: 0},
+			Digest: json.Marshal,
 		}
 	}
 	//// We are good to create game
@@ -79,7 +79,7 @@ func createGame(data []byte) CommandResponse {
 	}
 
 	gameID := stringIDFromNumbers(atomicClockValue)
-	metadata := GameMetadata{id: gameID, owner: authID, createdAt: time.Now().UTC().Unix(), lastUsed: time.Now().UTC().Unix()}
+	metadata := GameMetadata{Id: gameID, Owner: authID, CreatedAt: time.Now().UTC().Unix(), LastUsed: time.Now().UTC().Unix()}
 	serializedMetadata := serializeMetadata(metadata)
 
 	// TODO Add Pipelining
@@ -107,8 +107,8 @@ func createGame(data []byte) CommandResponse {
 	// As long as the gameID is an identifier.
 
 	return CommandResponse{
-		data:   metadata,
-		digest: json.Marshal,
+		Data:   metadata,
+		Digest: json.Marshal,
 	}
 }
 
@@ -140,7 +140,7 @@ func canCreateGame(authID string) (bool, error) {
 }
 
 // Ah yes so Go has the "any" type just like typescript
-func joinGame(data []byte) CommandResponse {
+func joinGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	// Get Auth ID from data
 	var authID string = "1"
 	var gameID string = "2"
@@ -153,8 +153,8 @@ func joinGame(data []byte) CommandResponse {
 		return respWithError(err)
 	} else if gameDataSerialized == "(nil)" {
 		return CommandResponse{
-			data:   GameWelcomeData{id: "", numPlayers: 0, data: ""},
-			digest: json.Marshal,
+			Data:   GameWelcomeData{Id: "", NumPlayers: 0, Data: ""},
+			Digest: json.Marshal,
 		}
 	}
 
@@ -168,12 +168,12 @@ func joinGame(data []byte) CommandResponse {
 	err = masterRedis.Do(radix.Cmd(&numPlayers, "SCARD", playerSetPrefix+gameID))
 
 	return CommandResponse{
-		data:   GameWelcomeData{id: gameID, numPlayers: numPlayers, data: gameDataSerialized},
-		digest: json.Marshal,
+		Data:   GameWelcomeData{Id: gameID, NumPlayers: numPlayers, Data: gameDataSerialized},
+		Digest: json.Marshal,
 	}
 }
 
-func leaveGame(data []byte) CommandResponse {
+func leaveGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	// Get Auth ID from data
 	var authID string = "1"
 	var gameID string = "2"
@@ -200,7 +200,7 @@ func leaveGame(data []byte) CommandResponse {
 	return successfulResponse()
 }
 
-func deleteGame(data []byte) CommandResponse {
+func deleteGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	// TODO Auth ID should be checked for ownership of room or "0" for super user
 	// Get Auth ID from data
 	var gameID string = "2"
@@ -253,7 +253,7 @@ func getRoomHealth(gameID string) (time.Time, error) {
 		return time.Now(), err
 	}
 
-	return time.Unix(metadata.lastUsed, 0), nil
+	return time.Unix(metadata.LastUsed, 0), nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -311,10 +311,10 @@ func unserializeMetadata(bytes string) (GameMetadata, error) {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-func applyAction(data []byte) CommandResponse {
+func applyAction(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	return unSuccessfulResponse("Command is Not Implemented!")
 }
 
-func getGameData(data []byte) CommandResponse {
+func getGameData(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	return unSuccessfulResponse("Command is Not Implemented!")
 }

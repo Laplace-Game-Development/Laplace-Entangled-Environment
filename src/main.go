@@ -10,9 +10,13 @@ import (
 const ioDeadline time.Duration = 5 * time.Millisecond
 const listeningIpAddress string = ""
 const listeningPortNumber string = "26005"
-const commandBytes = 2
+const commandBytes = 4
 const numberOfGames = 20
 const throttleGames = false
+
+// These should not change during runtime
+var malformedDataMsg []byte = []byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}")
+var malformedDataMsgLen int = len([]byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}"))
 
 // Command Logic Settings
 const createGameAuthSliceLow = 2
@@ -106,7 +110,7 @@ func handleConnection(clientConn ClientConn) {
 
 	// Read Bytes
 	// Bytes need to be instantiated otherwise golang will not read to them
-	dataIn := make([]byte, 1024)
+	dataIn := make([]byte, 2048)
 	keepAlive := true
 
 	for keepAlive {
@@ -117,32 +121,55 @@ func handleConnection(clientConn ClientConn) {
 			return
 		}
 
-		if n < 2 {
+		if n < commandBytes {
 			// respond with error and help message
 			// ==
 			// Do we want to be helpful or deny illegal uses of the API?
 			return
 		}
 
-		cmd, err := parseCommand(dataIn)
+		prefix, err := parseRequestPrefix(dataIn)
 		if err != nil {
 			log.Println(err)
 			return
 		}
+		data := dataIn[commandBytes:]
+
+		if prefix.IsEncoded {
+			data, err = base64Decode(data)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+		}
 
 		wasInsecure := !clientConn.isSecured
-		err = monadicallySecure(&clientConn, cmd)
+		err = monadicallySecure(&clientConn, prefix.Command)
 		if err != nil {
 			log.Println(err)
 			return
 		} else if !wasInsecure && clientConn.isSecured {
-			cmd = cmdEmpty
 			keepAlive = true
+			continue
 		}
 
-		// We may want to parse Token/Arguments Here
+		var requestHeader RequestHeader
+		if !clientConn.isSecured {
+			requestHeader, err = parseRequestHeader(prefix, data)
+			if err != nil {
+				log.Println(err)
+				n, writeErr := clientConn.conn.Write(malformedDataMsg)
+				if err != nil || n < malformedDataMsgLen {
+					log.Println(writeErr)
+				}
+				return
+			}
+		} else {
+			// Default Everrything to Zero Value. secure.go Commands will do their own parsing.
+			requestHeader = RequestHeader{}
+		}
 
-		response, serverErr := switchOnCommand(cmd, clientConn, dataIn)
+		response, serverErr := switchOnCommand(prefix, requestHeader, clientConn, data[requestHeader.bodyStart:])
 		if serverErr != nil {
 			log.Println(serverErr)
 			return
@@ -156,9 +183,7 @@ func handleConnection(clientConn ClientConn) {
 			return
 		}
 
-		if !keepAlive {
-			keepAlive = computeKeepAlive(clientConn.conn)
-		}
+		keepAlive = computeKeepAlive(clientConn)
 
 		if keepAlive {
 			clear(dataIn)
@@ -166,8 +191,7 @@ func handleConnection(clientConn ClientConn) {
 	}
 }
 
-func computeKeepAlive(conn net.Conn) bool {
+func computeKeepAlive(clientConn ClientConn) bool {
 	// Add Logic for Connection Overhead
-	return true
-
+	return !clientConn.isSecured
 }

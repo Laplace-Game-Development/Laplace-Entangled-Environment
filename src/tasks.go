@@ -362,9 +362,13 @@ func healthTaskWork(args []string) error {
 	}
 
 	if gameTime.Add(staleGameDuration).Before(time.Now()) {
-		resp := deleteGame([]byte(args[0]))
-		if resp.serverError != nil {
-			return resp.serverError
+		// TODO Generate Sig for Game Deletion
+		resp := deleteGame(
+			RequestPrefix{Command: cmdGameDelete},
+			RequestHeader{UserID: "-1", Sig: "REALLY RANDOM STRING"},
+			[]byte(""))
+		if resp.ServerError != nil {
+			return resp.ServerError
 		}
 
 	} else {

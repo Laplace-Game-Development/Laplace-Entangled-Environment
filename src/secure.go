@@ -241,13 +241,13 @@ func constructNewToken(authID string) ([]byte, error) {
 }
 
 type UserInfo struct {
-	authID   string
-	username string
+	AuthID   string
+	Username string
 }
 
-func getUserByUsername(data []byte) CommandResponse {
+func getUserByUsername(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	var authID string
-	username := string(data[2:])
+	username := string(body[2:])
 
 	err := masterRedis.Do(radix.Cmd(&authID, "HGET", userAuthIDTable, username))
 	if err != nil {
@@ -257,7 +257,7 @@ func getUserByUsername(data []byte) CommandResponse {
 	}
 
 	return CommandResponse{
-		data:   UserInfo{authID: authID, username: username},
-		digest: json.Marshal,
+		Data:   UserInfo{AuthID: authID, Username: username},
+		Digest: json.Marshal,
 	}
 }
