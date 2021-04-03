@@ -1,5 +1,7 @@
 package main
 
+import "errors"
+
 func clear(data []byte) {
 	for i := 0; i < len(data); i++ {
 		data[i] = 0
@@ -38,4 +40,20 @@ func strTokWithEscape(seperator []byte, escape []byte, str []byte, start uint) (
 	}
 
 	return nil, 0
+}
+
+func concat(output *[]byte, input []byte, outputStart int) error {
+	outputLength := len(*output)
+	inputLength := len(input)
+
+	if outputStart+inputLength > outputLength {
+		return errors.New("Out of Index Error!")
+	}
+
+	for i := 0; i < inputLength; i++ {
+		(*output)[outputStart] = input[i]
+		outputStart += 1
+	}
+
+	return nil
 }

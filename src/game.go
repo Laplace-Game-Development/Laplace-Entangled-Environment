@@ -11,3 +11,17 @@ func startGameLogic() (func(), error) {
 	log.Println("Game Logic is not implemented!")
 	return func() {}, nil
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Game Actions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+func applyAction(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
+	return unSuccessfulResponse("Command is Not Implemented!")
+}
+
+func getGameData(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
+	return unSuccessfulResponse("Command is Not Implemented!")
+}

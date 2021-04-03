@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/tls"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/mediocregopher/radix/v3"
@@ -25,6 +27,7 @@ const authIDSetUsernameField string = "username"
 const authIDSetTokenField string = "token"
 const authIDSetTokenStaleDateTimeField string = "stale"
 const authIDSetTokenUseCounter string = "tokenUses"
+const superUserID string = "-1"
 
 // Encryption Configurables
 const crtLocation string = "./tlscert.crt"
@@ -245,10 +248,10 @@ type UserInfo struct {
 	Username string
 }
 
-func getUserByUsername(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
-	var authID string
+func getUser(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
 	username := string(body[2:])
 
+	var authID string
 	err := masterRedis.Do(radix.Cmd(&authID, "HGET", userAuthIDTable, username))
 	if err != nil {
 		return respWithError(err)
@@ -260,4 +263,115 @@ func getUserByUsername(prefix RequestPrefix, header RequestHeader, body []byte) 
 		Data:   UserInfo{AuthID: authID, Username: username},
 		Digest: json.Marshal,
 	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Utility Security Functions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+func requestWithSuperUser(cmd ClientCmd, args interface{}) (RequestPrefix, RequestHeader, []byte, error) {
+	token, err := constructNewToken(superUserID)
+	if err != nil {
+		return RequestPrefix{}, RequestHeader{}, nil, err
+	}
+
+	prefix := RequestPrefix{IsEncoded: false, IsJSON: false, Command: cmd}
+
+	body, err := json.Marshal(args)
+	if err != nil {
+		return RequestPrefix{}, RequestHeader{}, nil, err
+	}
+
+	bodyLen := len(body)
+	tokenLen := len(token)
+	counterLen := len("0")
+
+	input := make([]byte, bodyLen+tokenLen+counterLen)
+	err = concat(&input, body, 0)
+	if err != nil {
+		return RequestPrefix{}, RequestHeader{}, nil, err
+	}
+
+	err = concat(&input, token, bodyLen)
+	if err != nil {
+		return RequestPrefix{}, RequestHeader{}, nil, err
+	}
+
+	err = concat(&input, []byte("0"), bodyLen+tokenLen)
+	if err != nil {
+		return RequestPrefix{}, RequestHeader{}, nil, err
+	}
+
+	checksumByte := sha256.Sum256(input)
+	checksum := string(checksumByte[:])
+
+	// Body Start is only used in main.go and is not necessary for a manual request command
+	header := RequestHeader{UserID: superUserID, Sig: checksum}
+
+	return prefix, header, body, nil
+}
+
+func verifySig(userID string, signature string, content []byte) error {
+	authIDSet := authIDSetPrefix + userID
+	redisReply := make([]string, 3)
+	err := masterRedis.Do(radix.Cmd(&redisReply, "HMGET", authIDSet,
+		authIDSetTokenField,
+		authIDSetTokenStaleDateTimeField,
+		authIDSetTokenUseCounter))
+
+	if err != nil {
+		return err
+	}
+
+	token := []byte(redisReply[0])
+	staleTimeUnix, err := strconv.Atoi(redisReply[1])
+	if err != nil {
+		return err
+	}
+
+	staleTime := time.Unix(int64(staleTimeUnix), 0)
+	counter, err := strconv.Atoi(redisReply[2])
+	if err != nil {
+		return err
+	}
+
+	if staleTime.Before(time.Now().UTC()) {
+		return errors.New("Token Is Stale!")
+	}
+
+	contentLen := len(content)
+	tokenLen := len(token)
+	counterLen := len(redisReply[2])
+
+	input := make([]byte, contentLen+tokenLen+counterLen)
+	err = concat(&input, content, 0)
+	if err != nil {
+		return err
+	}
+
+	err = concat(&input, token, contentLen)
+	if err != nil {
+		return err
+	}
+
+	err = concat(&input, []byte(redisReply[2]), contentLen+tokenLen)
+	if err != nil {
+		return err
+	}
+
+	checksumByte := sha256.Sum256(input)
+	checksum := string(checksumByte[:])
+	if signature == checksum {
+		err = masterRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
+			authIDSetTokenUseCounter, fmt.Sprintf("%d", counter+1)))
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	return errors.New(fmt.Sprintf("Signature is Incorrect!: %s vs %s", signature, checksum))
 }

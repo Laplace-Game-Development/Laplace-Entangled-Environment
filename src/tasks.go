@@ -362,11 +362,12 @@ func healthTaskWork(args []string) error {
 	}
 
 	if gameTime.Add(staleGameDuration).Before(time.Now()) {
-		// TODO Generate Sig for Game Deletion
-		resp := deleteGame(
-			RequestPrefix{Command: cmdGameDelete},
-			RequestHeader{UserID: "-1", Sig: "REALLY RANDOM STRING"},
-			[]byte(""))
+		prefix, header, body, err := requestWithSuperUser(cmdGameDelete, SelectGameArgs{args[0]})
+		if err != nil {
+			return err
+		}
+
+		resp := deleteGame(prefix, header, body)
 		if resp.ServerError != nil {
 			return resp.ServerError
 		}

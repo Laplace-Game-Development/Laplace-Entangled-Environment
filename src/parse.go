@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -99,7 +100,7 @@ const (
 	//                   //=====================
 	//                     User Management Commands
 	//                   //=====================
-	cmdGetUserByUsername //      //0000_0001_0000_0000
+	cmdGetUser //        //0000_0001_0000_0000
 	//                   //=====================
 	//                     Game Management Commands
 	//                   //=====================
@@ -118,7 +119,7 @@ var commandMap map[int64]ClientCmd = map[int64]ClientCmd{
 	1<<0 + 8: cmdStartTLS,
 	1<<4 + 0: cmdAction,
 	1<<4 + 1: cmdObserve,
-	1<<5 + 0: cmdGetUserByUsername,
+	1<<5 + 0: cmdGetUser,
 	1<<9 + 0: cmdGameCreate,
 	1<<9 + 1: cmdGameJoin,
 	1<<9 + 2: cmdGameLeave,
@@ -195,8 +196,8 @@ func switchOnCommand(prefix RequestPrefix, header RequestHeader, clientConn Clie
 		break
 
 	// User Management Commands
-	case cmdGetUserByUsername:
-		res = getUserByUsername(prefix, header, body)
+	case cmdGetUser:
+		res = getUser(prefix, header, body)
 		break
 
 	// Game Management Commands
@@ -252,6 +253,8 @@ func decodeJsonHeader(data []byte) (RequestHeader, error) {
 		}
 	}
 
+	res.bodyStart = uint64(counter)
+
 	return res, nil
 }
 
@@ -265,6 +268,38 @@ func decodeASN1Header(data []byte) (RequestHeader, error) {
 	res.bodyStart = uint64(len(data) - len(body))
 
 	return res, nil
+}
+
+// ptr should be a pointer to the interface, not the interface itself!!!!
+func parseBody(ptr interface{}, prefix RequestPrefix, body []byte) error {
+	var err error
+	if prefix.IsEncoded {
+		body, err = base64Decode(body)
+		if err != nil {
+			return err
+		}
+	}
+
+	if prefix.IsJSON {
+		return parseJson(ptr, body)
+	}
+
+	return parseASN1(ptr, body)
+}
+
+func parseJson(ptr interface{}, body []byte) error {
+	return json.Unmarshal(body, ptr)
+}
+
+func parseASN1(ptr interface{}, body []byte) error {
+	empty, err := asn1.Unmarshal(body, ptr)
+	if err != nil {
+		return err
+	} else if len(empty) > 0 {
+		log.Println("ASN1 Parsing Has Extra Bytes... Returning Anyways!")
+	}
+
+	return nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
