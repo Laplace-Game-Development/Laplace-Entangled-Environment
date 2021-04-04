@@ -221,8 +221,7 @@ func leaveGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandR
 	if err != nil {
 		return respWithError(err)
 	} else if numPlayers <= 0 {
-		// TODO replace 0 with superuser ID
-		submitGameForHealthCheck(superUserID, args.GameID)
+		submitGameForHealthCheck(args.GameID)
 	}
 
 	return successfulResponse()
@@ -281,14 +280,14 @@ func getRoomHealth(gameID string) (time.Time, error) {
 
 	err := masterRedis.Do(radix.Cmd(&marshalledMetadata, "HGET", metadataHashSetName, gameID))
 	if err != nil {
-		return time.Now(), err
+		return time.Now().UTC(), err
 	} else if len(marshalledMetadata) <= 0 {
-		return time.Now(), errors.New("Game Metadata does not seem to exists. GameID: " + gameID)
+		return time.Now().UTC(), errors.New("Game Metadata does not seem to exists. GameID: " + gameID)
 	}
 
 	metadata, err := unserializeMetadata(marshalledMetadata)
 	if err != nil {
-		return time.Now(), err
+		return time.Now().UTC(), err
 	}
 
 	return time.Unix(metadata.LastUsed, 0), nil

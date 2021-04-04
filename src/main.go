@@ -48,11 +48,15 @@ func main() {
 	cleanUp = invokeServerStartup(startRoomsSystem)
 	defer cleanUp()
 
-	// 5. Start Task/Queue Service
+	// 5. Start Task Worker Service
 	cleanUp = invokeServerStartup(startTaskQueue)
 	defer cleanUp()
 
-	// 6. Everything is ready -- Start Listening
+	// 6. Start Scheduler Service
+	cleanUp = invokeServerStartup(startCronScheduler)
+	defer cleanUp()
+
+	// 7. Everything is ready -- Start Listening
 	startListening()
 }
 

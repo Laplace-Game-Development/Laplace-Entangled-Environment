@@ -27,7 +27,6 @@ const authIDSetUsernameField string = "username"
 const authIDSetTokenField string = "token"
 const authIDSetTokenStaleDateTimeField string = "stale"
 const authIDSetTokenUseCounter string = "tokenUses"
-const superUserID string = "-1"
 
 // Encryption Configurables
 const crtLocation string = "./tlscert.crt"
@@ -37,6 +36,7 @@ const escapeChar byte = byte('~')
 // Token Configurables
 const tokenLength int = 256
 const tokenStaleTime time.Duration = time.Minute * 5
+const superUserTokenCount int = 10
 
 // This will be assigned on startup then left unchanged
 var tlsConfig tls.Config = tls.Config{}
@@ -47,6 +47,43 @@ var secureMap map[ClientCmd]bool = map[ClientCmd]bool{
 	cmdRegister: true,
 	cmdNewToken: true,
 }
+
+// This Map is a Set!
+// This should never change during runtime
+var superUserIdMap map[string]bool = map[string]bool{
+	"-1":  true,
+	"-2":  true,
+	"-3":  true,
+	"-4":  true,
+	"-5":  true,
+	"-6":  true,
+	"-7":  true,
+	"-8":  true,
+	"-9":  true,
+	"-10": true,
+}
+
+type UserInfo struct {
+	AuthID   string
+	Username string
+}
+
+type SuperUserToken struct {
+	UserID    string
+	Token     []byte
+	StaleDate time.Time
+}
+
+type SuperUserRequest struct {
+	UserToken SuperUserToken
+	Prefix    RequestPrefix
+	Header    RequestHeader
+	Body      []byte
+	Cleanup   func()
+}
+
+// Global Variables | Singletons
+var superUserAvailableTokens chan SuperUserToken = make(chan SuperUserToken, superUserTokenCount)
 
 func startEncryption() (func(), error) {
 	log.Printf("Loading Certificate From: %s \nand Key From: %s\n", crtLocation, keyLocation)
@@ -59,6 +96,18 @@ func startEncryption() (func(), error) {
 	tlsConfig = tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS13,
+	}
+
+	// Load Super User Tokens
+	var token []byte
+	var staleDate time.Time
+	for userID, _ := range superUserIdMap {
+		token, staleDate, err = constructNewToken(userID)
+		if err != nil {
+			return nil, err
+		}
+
+		superUserAvailableTokens <- SuperUserToken{UserID: userID, Token: token, StaleDate: staleDate}
 	}
 
 	return cleanUpEncryption, nil
@@ -182,7 +231,7 @@ func login(data []byte) CommandResponse {
 		return respWithError(err)
 	}
 
-	token, err := constructNewToken(authID)
+	token, _, err := constructNewToken(authID)
 	if err != nil {
 		return respWithError(err)
 	}
@@ -220,32 +269,27 @@ func getAuthID(username []byte) (string, error) {
 	return authID, nil
 }
 
-func constructNewToken(authID string) ([]byte, error) {
+func constructNewToken(authID string) ([]byte, time.Time, error) {
 	authIDSet := authIDSetPrefix + authID
 	token := make([]byte, tokenLength)
-	staleDateTime := time.Now().Add(staleGameDuration).Unix()
+	staleDateTime := time.Now().UTC().Add(staleGameDuration)
 
 	n, err := rand.Read(token)
 	if err != nil {
-		return nil, err
+		return nil, staleDateTime, err
 	} else if n < tokenLength {
-		return nil, errors.New("rand.Read did not return full Token!")
+		return nil, staleDateTime, errors.New("rand.Read did not return full Token!")
 	}
 
 	err = masterRedis.Do(radix.Cmd(nil, "HMSET", authIDSet,
 		authIDSetTokenField, string(token),
-		authIDSetTokenStaleDateTimeField, fmt.Sprintf("%d", staleDateTime),
+		authIDSetTokenStaleDateTimeField, fmt.Sprintf("%d", staleDateTime.Unix()),
 		authIDSetTokenUseCounter, "0"))
 	if err != nil {
-		return nil, err
+		return nil, staleDateTime, err
 	}
 
-	return token, nil
-}
-
-type UserInfo struct {
-	AuthID   string
-	Username string
+	return token, staleDateTime, nil
 }
 
 func getUser(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
@@ -271,46 +315,82 @@ func getUser(prefix RequestPrefix, header RequestHeader, body []byte) CommandRes
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-func requestWithSuperUser(cmd ClientCmd, args interface{}) (RequestPrefix, RequestHeader, []byte, error) {
-	token, err := constructNewToken(superUserID)
+// isTask: True --> will Block
+// isTask: False --> will Response with Error
+func getSuperUserToken(isTask bool) (SuperUserToken, error) {
+	var userToken SuperUserToken
+
+	if isTask {
+		userToken = <-superUserAvailableTokens
+	} else {
+		select {
+		case userToken = <-superUserAvailableTokens:
+			break
+		default:
+			return SuperUserToken{}, errors.New("Could Not Acquire Free Token!")
+		}
+	}
+
+	if userToken.StaleDate.Before(time.Now().UTC().Add(time.Minute)) {
+		newToken, staleDate, err := constructNewToken(userToken.UserID)
+		if err != nil {
+			return SuperUserToken{}, err
+		}
+
+		userToken.Token = newToken
+		userToken.StaleDate = staleDate
+	}
+
+	return userToken, nil
+}
+
+// Use this to return tokens acquired from getSuperUserToken
+func cleanupSuperUserToken(userToken SuperUserToken) {
+	superUserAvailableTokens <- userToken
+}
+
+// When using, make sure to defer SuperUserRequest.Cleanup on a succssful call
+func requestWithSuperUser(isTask bool, cmd ClientCmd, args interface{}) (SuperUserRequest, error) {
+	userToken, err := getSuperUserToken(isTask)
 	if err != nil {
-		return RequestPrefix{}, RequestHeader{}, nil, err
+		return SuperUserRequest{}, err
 	}
 
 	prefix := RequestPrefix{IsEncoded: false, IsJSON: false, Command: cmd}
 
 	body, err := json.Marshal(args)
 	if err != nil {
-		return RequestPrefix{}, RequestHeader{}, nil, err
+		return SuperUserRequest{}, err
 	}
 
 	bodyLen := len(body)
-	tokenLen := len(token)
+	tokenLen := len(userToken.Token)
 	counterLen := len("0")
 
 	input := make([]byte, bodyLen+tokenLen+counterLen)
 	err = concat(&input, body, 0)
 	if err != nil {
-		return RequestPrefix{}, RequestHeader{}, nil, err
+		return SuperUserRequest{}, err
 	}
 
-	err = concat(&input, token, bodyLen)
+	err = concat(&input, userToken.Token, bodyLen)
 	if err != nil {
-		return RequestPrefix{}, RequestHeader{}, nil, err
+		return SuperUserRequest{}, err
 	}
 
 	err = concat(&input, []byte("0"), bodyLen+tokenLen)
 	if err != nil {
-		return RequestPrefix{}, RequestHeader{}, nil, err
+		return SuperUserRequest{}, err
 	}
 
 	checksumByte := sha256.Sum256(input)
 	checksum := string(checksumByte[:])
 
 	// Body Start is only used in main.go and is not necessary for a manual request command
-	header := RequestHeader{UserID: superUserID, Sig: checksum}
+	header := RequestHeader{UserID: userToken.UserID, Sig: checksum}
+	cleanup := func() { cleanupSuperUserToken(userToken) }
 
-	return prefix, header, body, nil
+	return SuperUserRequest{UserToken: userToken, Prefix: prefix, Header: header, Body: body, Cleanup: cleanup}, nil
 }
 
 func verifySig(userID string, signature string, content []byte) error {
@@ -364,10 +444,14 @@ func verifySig(userID string, signature string, content []byte) error {
 	checksumByte := sha256.Sum256(input)
 	checksum := string(checksumByte[:])
 	if signature == checksum {
-		err = masterRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
-			authIDSetTokenUseCounter, fmt.Sprintf("%d", counter+1)))
-		if err != nil {
-			return err
+
+		_, exists := superUserIdMap[userID]
+		if !exists {
+			err = masterRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
+				authIDSetTokenUseCounter, fmt.Sprintf("%d", counter+1)))
+			if err != nil {
+				return err
+			}
 		}
 
 		return nil
