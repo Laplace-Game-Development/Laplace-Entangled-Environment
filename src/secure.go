@@ -101,7 +101,7 @@ func startEncryption() (func(), error) {
 	// Load Super User Tokens
 	var token []byte
 	var staleDate time.Time
-	for userID, _ := range superUserIdMap {
+	for userID := range superUserIdMap {
 		token, staleDate, err = constructNewToken(userID)
 		if err != nil {
 			return nil, err

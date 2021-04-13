@@ -1,0 +1,22 @@
+{
+  "name": "laplace-entangled-env-middleware",
+  "version": "1.0.0",
+  "description": "A Middleware with zeromq to communicate to and from Laplace Entangled Environment",
+  "main": "middleware.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "middleware",
+    "game",
+    "engine",
+    "networking",
+    "zeromq"
+  ],
+  "author": "Tristan Hilbert (TFlexSoom)",
+  "license": "LGPLv3",
+  "dependencies": {
+    "yargs": "^16.2.0",
+    "zeromq": "^5.2.0"
+  }
+}
