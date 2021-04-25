@@ -2,10 +2,12 @@
   "name": "laplace-entangled-env-middleware",
   "version": "1.0.0",
   "description": "A Middleware with zeromq to communicate to and from Laplace Entangled Environment",
-  "main": "middleware.js",
+  "main": "example.js",
   "scripts": {
+    "start": "node example.js --binding=5011",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "type": "module",
   "keywords": [
     "middleware",
     "game",

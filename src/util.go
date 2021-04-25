@@ -1,6 +1,11 @@
 package main
 
-import "errors"
+import (
+	"errors"
+	"log"
+)
+
+type ErrorRunnable func() error
 
 func clear(data []byte) {
 	for i := 0; i < len(data); i++ {
@@ -56,4 +61,12 @@ func concat(output *[]byte, input []byte, outputStart int) error {
 	}
 
 	return nil
+}
+
+func errorless(fn ErrorRunnable) {
+	err := fn()
+
+	if err != nil {
+		log.Fatalln(err)
+	}
 }

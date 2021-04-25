@@ -8,6 +8,8 @@ func startGameLogic() (func(), error) {
 	// 3. Init Shared Memory for efficient IPC
 	// 4. Construct Singleton Queue
 
+	// exec node example.js --binding=5011
+
 	log.Println("Game Logic is not implemented!")
 	return func() {}, nil
 }

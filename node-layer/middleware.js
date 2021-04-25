@@ -6,11 +6,11 @@
  */
 
 
-import zmq, { socket } from "zeromq"
+import zmq from "zeromq"
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
-const args = yargs(hideBin(process.argv));
+const args = yargs(hideBin(process.argv)).argv;
 
 if (args.binding === undefined) {
     throw new Error("Binding must be provided to application!");
@@ -25,6 +25,14 @@ var sock;
 // Binding IP Address
 const binding = args.binding;
 
+
+
+
+/***********************************************************************
+ * Public Interface
+ * 
+ ***********************************************************************/
+
 /**
  * Starts the Message Queueing Middleware
  * @param {function} callback called with no parameters when process is completed 
@@ -32,15 +40,17 @@ const binding = args.binding;
  *     or rejects with error if error occurs
  */
 export function start(callback) {
-    sock = zmq.Reply();
+    var address = "tcp://127.0.0.1:" + binding;
+    sock = zmq.socket("rep");
 
-    return Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         try {
             console.log("STARTING Laplace Entangled Middleware!");
-            await sock.bind(binding);
+            console.log("binding to: " + address);
+            await sock.bind(address);
             console.log("STARTED Laplace Entangled Middleware!");
             resolve();
-            callback();
+            callback != undefined && callback();
         } catch (err) {
             console.error(err);
             reject(err);
@@ -56,6 +66,12 @@ export function isServer(){
     return true;
 }
 
+/**
+ * Send Gamestate to the client and/or wait for a response
+ * @param {any} state JS Object of Game State
+ * @param {function} callback Callback Function once Message is received
+ * 
+ */
 export function sendGameState(state, callback) {
     /*
      * Alone, sock.recieve with no configuration will block 
@@ -64,19 +80,68 @@ export function sendGameState(state, callback) {
 
     if(hasReceivedRequest){
         sock.send(["", JSON.stringify(state)]).then(
-            socketReceive.bind(null, callback, sock.receive),
+            socketReceive.bind(null, callback),
             onError.bind(null, callback)
         );
     }else {
-        socketReceive(callback, sock.receive)
+        socketReceive(callback);
     }
 }
 
-function socketReceive(callback, promiseFunc) {
-    promiseFunc().then(
-        onReceiveSuccess.bind(null, callback),
-        onError.bind(null, callback)
-    );
+// cmdRegister
+export function register(username, password, callback) {
+    callback(null);
+}
+
+// cmdNewToken
+export function newToken(username, password, callback) {
+    callback(null);
+}
+
+// cmdStartTLS
+export function startTLS(callback) {
+    callback(null);
+}
+
+// cmdObserve
+export function observeGame(gameID, callback){
+    callback(null);
+}
+
+// cmdGetUser
+export function getAuthID(username, callback){
+    callback(null);
+}
+
+// cmdGameCreate
+export function createGame(callback){
+    callback(null);
+}
+
+// cmdGameJoin
+export function joinGame(gameID, callback){
+    callback(null);
+}
+
+
+// cmdGameLeave
+export function leaveGame(callback){
+    callback(null);
+}
+
+
+// cmdGameDelete
+export function deleteGame(gameID, callback){
+    callback(null);
+}
+
+/***********************************************************************
+ * Private Utilities
+ * 
+ ***********************************************************************/
+
+function socketReceive(callback) {
+    sock.on("message", onReceiveSuccess.bind(null, callback));
 }
 
 function onReceiveSuccess(callback, messages) {
@@ -84,10 +149,9 @@ function onReceiveSuccess(callback, messages) {
     console.log(messages);
 
     hasReceivedRequest = true;
-    callback(messages);
+    callback(null, messages);
 }
 
 function onError(callback, error){
-    console.error(err);
-    callback(null);   
+    callback(error);   
 }

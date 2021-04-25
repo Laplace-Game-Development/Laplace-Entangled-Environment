@@ -293,7 +293,7 @@ func constructNewToken(authID string) ([]byte, time.Time, error) {
 }
 
 func getUser(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
-	username := string(body[2:])
+	username := string(body[:])
 
 	var authID string
 	err := masterRedis.Do(radix.Cmd(&authID, "HGET", userAuthIDTable, username))
