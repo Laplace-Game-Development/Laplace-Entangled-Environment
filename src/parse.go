@@ -14,32 +14,38 @@ import (
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// third and fourth bytes of a request
+//// Incomming Request Definitions
+
+// 2nd and 3rd bytes of a TCP Request
 // Establish which endpoint/action the request is for
 type ClientCmd int64
 
-// First four bytes of a request.
-type RequestPrefix struct {
-	IsEncoded bool
-	IsJSON    bool
-	Command   ClientCmd
-}
-
-// Command is synonymous to a request body
-/*
- * This represents the typical params found in most
- * requests that require arugments
- */
-
-type RequestHeader struct {
+// JSON or ASN1 Attachment for Authentication and Regulation
+type RequestAttachment struct {
 	// Who the Command is From
 	UserID string
 
 	// Request Signature for Authentication
 	Sig string
+}
 
-	// The Byte Index in Data for the Start of Body
-	bodyStart uint64
+//// Private Request Definitions For Parsing
+type RequestHeader struct {
+	// Command To Be Handled (i.e. Sent in TCP Prefix)
+	Command ClientCmd
+
+	// Who the Command is From
+	UserID string
+
+	// Request Signature for Authenticated Requests
+	Sig string
+}
+
+type RequestBodyFactories struct {
+	// Interface Parameter should be a pointer
+	parseFactory func(ptr interface{}) error
+
+	sigVerify func(userID string, userSig string) error
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -91,7 +97,6 @@ const (
 	//                   //=====================
 	cmdRegister //       //0000_0000_0000_0001
 	cmdNewToken //       //0000_0000_0000_0010
-	cmdStartTLS //       //0000_0000_0000_1000
 	//                   //=====================
 	//                     Through Commands (To Third Party)
 	//                   //=====================
@@ -116,7 +121,6 @@ var commandMap map[int64]ClientCmd = map[int64]ClientCmd{
 	1<<0 + 0: cmdEmpty,
 	1<<0 + 1: cmdRegister,
 	1<<0 + 2: cmdNewToken,
-	1<<0 + 8: cmdStartTLS,
 	1<<4 + 0: cmdAction,
 	1<<4 + 1: cmdObserve,
 	1<<5 + 0: cmdGetUser,
@@ -126,50 +130,59 @@ var commandMap map[int64]ClientCmd = map[int64]ClientCmd{
 	1<<9 + 3: cmdGameDelete,
 }
 
-func parseRequestPrefix(data []byte) (RequestPrefix, error) {
-	isEncoded := data[0] != byte(0)
+//// Functions!
 
-	// Capitalize Byte
-	data[1] = data[1] & 0b1101_1111
-
-	isJson := data[1] == byte('J')
-	if !isJson && data[1] != byte('A') {
-		return RequestPrefix{}, errors.New("Invalid Command")
-	}
-
-	var cmd int64 = int64(data[2])
-	cmd = (cmd << 8) + int64(data[3])
+// 1. Parse Command and add to Header
+func parseCommand(mostSignificant byte, leastSignificant byte) (ClientCmd, error) {
+	var cmd int64 = int64(mostSignificant)
+	cmd = (cmd << 8) + int64(leastSignificant)
 
 	result, exists := commandMap[cmd]
 
 	if exists == false {
-		return RequestPrefix{}, errors.New("Invalid Command")
+		return 0, errors.New("Invalid Command")
 	}
 
-	return RequestPrefix{isEncoded, isJson, result}, nil
+	return result, nil
 }
 
-func parseRequestHeader(prefix RequestPrefix, data []byte) (RequestHeader, error) {
-	var header RequestHeader
+// 2. Parse Request Attachment and add to Header
+func parseRequestAttachment(isJSON bool, data *[]byte) (RequestAttachment, int, error) {
+	if isJSON {
+		return decodeJsonAttachment(data)
+	}
+
+	return decodeASN1Attachment(data)
+}
+
+// 4. Create a factory for body Payload Structs for Handling Commands
+
+// ptr should be a pointer to the interface, not the interface itself!!!!
+func parseBody(ptr interface{}, prefix TCPRequestPrefix, body *[]byte) error {
 	var err error
+	if prefix.IsBase64Enc {
+		*body, err = base64Decode(body)
+		if err != nil {
+			return err
+		}
+	}
 
 	if prefix.IsJSON {
-		header, err = decodeJsonHeader(data)
-		return header, err
-	} else {
-		header, err = decodeASN1Header(data)
-		return header, err
+		return parseJson(ptr, body)
 	}
+
+	return parseASN1(ptr, body)
 }
 
-func switchOnCommand(prefix RequestPrefix, header RequestHeader, clientConn ClientConn, body []byte) ([]byte, error) {
+// 5. Switch based on RequestHeader.Command
+func switchOnCommand(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) ([]byte, error) {
 	var res CommandResponse
 
-	if needsSecurity(prefix.Command) && !clientConn.isSecured {
+	if needsSecurity(header.Command) && !isSecureConnection {
 		return newErrorJson("Unsecure Connection!"), nil
 	}
 
-	switch prefix.Command {
+	switch header.Command {
 	// Empty Commands
 	case cmdEmpty:
 		res = successfulResponse()
@@ -177,40 +190,40 @@ func switchOnCommand(prefix RequestPrefix, header RequestHeader, clientConn Clie
 
 	// TLS Commands
 	case cmdRegister:
-		res = register(body)
+		res = register(header, bodyFactories, isSecureConnection)
 		break
 
 	case cmdNewToken:
-		res = login(body)
+		res = login(header, bodyFactories, isSecureConnection)
 		break
 
 	// cmdStartTLS is an exception to this switch statement. (It occurs in main.go)
 
 	// Through Commands (To Third Party)
 	case cmdAction:
-		res = applyAction(prefix, header, body)
+		res = applyAction(header, bodyFactories, isSecureConnection)
 		break
 
 	case cmdObserve:
-		res = getGameData(prefix, header, body)
+		res = getGameData(header, bodyFactories, isSecureConnection)
 		break
 
 	// User Management Commands
 	case cmdGetUser:
-		res = getUser(prefix, header, body)
+		res = getUser(header, bodyFactories, isSecureConnection)
 		break
 
 	// Game Management Commands
 	case cmdGameCreate:
-		res = createGame(prefix, header, body)
+		res = createGame(header, bodyFactories, isSecureConnection)
 		break
 
 	case cmdGameJoin:
-		res = joinGame(prefix, header, body)
+		res = joinGame(header, bodyFactories, isSecureConnection)
 		break
 
 	case cmdGameLeave:
-		res = leaveGame(prefix, header, body)
+		res = leaveGame(header, bodyFactories, isSecureConnection)
 		break
 
 	default:
@@ -232,67 +245,50 @@ func switchOnCommand(prefix RequestPrefix, header RequestHeader, clientConn Clie
 //// Utility Encoding Functions
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-func base64Decode(data []byte) ([]byte, error) {
-	res := make([]byte, base64.StdEncoding.DecodedLen(len(data)))
-	_, err := base64.StdEncoding.Decode(data, res)
+func base64Decode(data *[]byte) ([]byte, error) {
+	res := make([]byte, base64.StdEncoding.DecodedLen(len(*data)))
+	_, err := base64.StdEncoding.Decode(*data, res)
 	return res, err
 }
 
-func decodeJsonHeader(data []byte) (RequestHeader, error) {
-	res := RequestHeader{}
-	err := json.Unmarshal(data, &res)
+func decodeJsonAttachment(data *[]byte) (RequestAttachment, int, error) {
+	res := RequestAttachment{}
+	err := json.Unmarshal(*data, &res)
 	if err != nil {
-		return res, err
+		return res, 0, err
 	}
 
 	var counter int
-	length := len(data)
+	length := len(*data)
 	for counter = 0; counter < length; counter += 1 {
-		if data[counter] == byte('}') {
+		if (*data)[counter] == byte('}') {
 			break
 		}
 	}
 
-	res.bodyStart = uint64(counter)
+	bodyFactoryStart := counter
 
-	return res, nil
+	return res, bodyFactoryStart, nil
 }
 
-func decodeASN1Header(data []byte) (RequestHeader, error) {
-	res := RequestHeader{}
-	body, err := asn1.Unmarshal(data, &res)
+func decodeASN1Attachment(data *[]byte) (RequestAttachment, int, error) {
+	res := RequestAttachment{}
+	body, err := asn1.Unmarshal(*data, &res)
 	if err != nil {
-		return res, err
+		return res, 0, err
 	}
 
-	res.bodyStart = uint64(len(data) - len(body))
+	bodyStart := len(*data) - len(body)
 
-	return res, nil
+	return res, bodyStart, nil
 }
 
-// ptr should be a pointer to the interface, not the interface itself!!!!
-func parseBody(ptr interface{}, prefix RequestPrefix, body []byte) error {
-	var err error
-	if prefix.IsEncoded {
-		body, err = base64Decode(body)
-		if err != nil {
-			return err
-		}
-	}
-
-	if prefix.IsJSON {
-		return parseJson(ptr, body)
-	}
-
-	return parseASN1(ptr, body)
+func parseJson(ptr interface{}, data *[]byte) error {
+	return json.Unmarshal(*data, ptr)
 }
 
-func parseJson(ptr interface{}, body []byte) error {
-	return json.Unmarshal(body, ptr)
-}
-
-func parseASN1(ptr interface{}, body []byte) error {
-	empty, err := asn1.Unmarshal(body, ptr)
+func parseASN1(ptr interface{}, data *[]byte) error {
+	empty, err := asn1.Unmarshal(*data, ptr)
 	if err != nil {
 		return err
 	} else if len(empty) > 0 {
@@ -333,10 +329,10 @@ func successfulResponse() CommandResponse {
 	}
 }
 
-func rawSuccessfulResponseBytes(msg []byte) CommandResponse {
+func rawSuccessfulResponseBytes(msg *[]byte) CommandResponse {
 	return CommandResponse{
 		UseRaw: true,
-		Raw:    msg,
+		Raw:    *msg,
 	}
 }
 

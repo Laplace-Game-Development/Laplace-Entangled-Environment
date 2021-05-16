@@ -58,8 +58,8 @@ type SelectGameArgs struct {
 	GameID string
 }
 
-func createGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
-	err := verifySig(header.UserID, header.Sig, []byte{})
+func createGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
 	if err != nil {
 		log.Printf("Unauthorized Attempt! Error: %v\n", err)
 		return unSuccessfulResponse("Unauthorized!")
@@ -148,15 +148,15 @@ func canCreateGame(authID string) (bool, error) {
 	return success != 0, nil
 }
 
-func joinGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
-	err := verifySig(header.UserID, header.Sig, body)
+func joinGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
 	if err != nil {
 		log.Printf("Unauthorized Attempt! Error: %v\n", err)
 		return unSuccessfulResponse("Unauthorized!")
 	}
 
 	args := SelectGameArgs{}
-	err = parseBody(&args, prefix, body)
+	err = bodyFactories.parseFactory(&args)
 	if err != nil {
 		log.Printf("Bad Argument! Error: %v\n", err)
 		return unSuccessfulResponse("Bad Arguments!")
@@ -191,15 +191,15 @@ func joinGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandRe
 	}
 }
 
-func leaveGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
-	err := verifySig(header.UserID, header.Sig, body)
+func leaveGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
 	if err != nil {
 		log.Printf("Unauthorized Attempt! Error: %v\n", err)
 		return unSuccessfulResponse("Unauthorized!")
 	}
 
 	args := SelectGameArgs{}
-	err = parseBody(&args, prefix, body)
+	err = bodyFactories.parseFactory(&args)
 	if err != nil {
 		log.Printf("Bad Argument! Error: %v\n", err)
 		return unSuccessfulResponse("Bad Arguments!")
@@ -227,15 +227,15 @@ func leaveGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandR
 	return successfulResponse()
 }
 
-func deleteGame(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
-	err := verifySig(header.UserID, header.Sig, body)
+func deleteGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
 	if err != nil {
 		log.Printf("Unauthorized Attempt! Error: %v\n", err)
 		return unSuccessfulResponse("Unauthorized!")
 	}
 
 	args := SelectGameArgs{}
-	err = parseBody(&args, prefix, body)
+	err = bodyFactories.parseFactory(&args)
 	if err != nil {
 		log.Printf("Bad Argument! Error: %v\n", err)
 		return unSuccessfulResponse("Bad Arguments!")

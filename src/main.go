@@ -13,7 +13,7 @@ var serverInitTaskList []ServerTask = []ServerTask{
 	startRoomsSystem,
 	startTaskQueue,
 	startCronScheduler,
-	startListener,
+	startListener, // Dependent on startEncryption
 }
 
 func main() {

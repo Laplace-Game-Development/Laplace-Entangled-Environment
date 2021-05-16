@@ -20,10 +20,10 @@ func startGameLogic() (func(), error) {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-func applyAction(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
+func applyAction(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
 	return unSuccessfulResponse("Command is Not Implemented!")
 }
 
-func getGameData(prefix RequestPrefix, header RequestHeader, body []byte) CommandResponse {
+func getGameData(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
 	return unSuccessfulResponse("Command is Not Implemented!")
 }

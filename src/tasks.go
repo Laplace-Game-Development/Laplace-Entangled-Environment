@@ -309,7 +309,7 @@ func healthTaskWork(args []string) error {
 			return err
 		}
 
-		resp := deleteGame(superUserRequest.Prefix, superUserRequest.Header, superUserRequest.Body)
+		resp := deleteGame(superUserRequest.Header, superUserRequest.BodyFactories, superUserRequest.IsSecureConnection)
 		if resp.ServerError != nil {
 			return resp.ServerError
 		}
