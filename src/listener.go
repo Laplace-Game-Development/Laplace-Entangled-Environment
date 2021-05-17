@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -77,8 +79,39 @@ func calculateResponse(requestHeader RequestHeader, bodyFactories RequestBodyFac
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// This should never change during runtime!
+var postOnlyCmdMap map[ClientCmd]bool = map[ClientCmd]bool{
+	cmdError:      false,
+	cmdEmpty:      false,
+	cmdRegister:   true,
+	cmdLogin:      true,
+	cmdAction:     true,
+	cmdObserve:    true,
+	cmdGetUser:    true,
+	cmdGameCreate: true,
+	cmdGameJoin:   true,
+	cmdGameLeave:  true,
+	cmdGameDelete: true,
+}
+
+type UserSigTuple struct {
+	UserID    string
+	Signature string
+}
+
 func startHTTPListening(ctx context.Context) {
-	http.HandleFunc("/", handleHttp)
+	http.HandleFunc("/empty/", getHttpHandler(cmdEmpty))
+	http.HandleFunc("/error/", getHttpHandler(cmdError))
+	http.HandleFunc("/register/", getHttpHandler(cmdRegister))
+	http.HandleFunc("/login/", getHttpHandler(cmdLogin))
+	http.HandleFunc("/action/", getHttpHandler(cmdAction))
+	http.HandleFunc("/observe/", getHttpHandler(cmdObserve))
+	http.HandleFunc("/user/", getHttpHandler(cmdGetUser))
+	http.HandleFunc("/game/create/", getHttpHandler(cmdGameCreate))
+	http.HandleFunc("/game/join/", getHttpHandler(cmdGameJoin))
+	http.HandleFunc("/game/leave/", getHttpHandler(cmdGameLeave))
+	http.HandleFunc("/game/delete/", getHttpHandler(cmdGameDelete))
+
 	http.HandleFunc("*", http.NotFound)
 
 	serverConfig := http.Server{
@@ -94,8 +127,112 @@ func startHTTPListening(ctx context.Context) {
 	}
 }
 
-func handleHttp(writer http.ResponseWriter, req *http.Request) {
-	// Do Something here!
+func getHttpHandler(command ClientCmd) func(writer http.ResponseWriter, req *http.Request) {
+	return func(writer http.ResponseWriter, req *http.Request) {
+		handleHttp(command, writer, req)
+	}
+}
+
+func handleHttp(clientCmd ClientCmd, writer http.ResponseWriter, req *http.Request) {
+	if checkPost(clientCmd, writer, req) {
+		return
+	}
+
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		log.Printf("Error Reading Body: %v\n", err)
+	}
+
+	userID, sig := parseHeaderInfo(req, &body)
+
+	requestHeader := RequestHeader{
+		Command: clientCmd,
+		UserID:  userID,
+		Sig:     sig,
+	}
+
+	bodyFactories := RequestBodyFactories{
+		parseFactory: func(ptr interface{}) error {
+			return json.Unmarshal(body, ptr)
+		},
+		sigVerify: func(userID string, userSig string) error {
+			return sigVerification(userID, userSig, &body)
+		},
+	}
+
+	calculateResponse(requestHeader, bodyFactories, req.TLS != nil)
+}
+
+func checkPost(clientCmd ClientCmd, writer http.ResponseWriter, req *http.Request) bool {
+	needsPost, exists := postOnlyCmdMap[clientCmd]
+	if exists && needsPost && req.Method != http.MethodPost {
+		output := unSuccessfulResponse("Post Required!")
+		writeable, err := output.Digest(output.Data)
+		if err != nil {
+			log.Fatal("handleHttp: Could Not Write Utility Response to User!")
+		}
+
+		writer.Write(writeable)
+		return true
+	}
+
+	return false
+}
+
+func parseHeaderInfo(req *http.Request, body *[]byte) (string, string) {
+	userID := ""
+	userIDFound := false
+	sig := ""
+	sigFound := false
+
+	possibleUserIDs := make([]string, 3)
+	possibleSigs := make([]string, 3)
+
+	// Check Header
+	possibleUserIDs[0] = req.Header.Get("laplace-user-id")
+	possibleSigs[0] = req.Header.Get("laplace-signature")
+
+	// Check Cookies
+	userIDCookie, cookieErr := req.Cookie("laplaceUserId")
+	if cookieErr != nil {
+		log.Println("UserID Cookie Could Not Be Parsed")
+	} else {
+		possibleUserIDs[1] = userIDCookie.Value
+	}
+
+	sigCookie, cookieErr := req.Cookie("laplaceSig")
+	if cookieErr == nil {
+		log.Println("Signature Cookie Could Not Be Parsed")
+	} else {
+		possibleSigs[1] = sigCookie.Value
+	}
+
+	// Check Body
+	if req.Body != nil {
+		userSigObj := UserSigTuple{}
+
+		err := json.Unmarshal(*body, &userSigObj)
+		if err == nil {
+			possibleUserIDs[2] = userSigObj.UserID
+			possibleSigs[2] = userSigObj.Signature
+		} else {
+			log.Println("Illformatted JSON sent to HTTP Header")
+		}
+	}
+
+	for i := 0; !userIDFound && !sigFound && i < 3; i++ {
+		if !userIDFound && len(possibleUserIDs[i]) > 0 {
+			userID = possibleUserIDs[i]
+			userIDFound = true
+		}
+
+		if !sigFound && len(possibleSigs[i]) > 0 {
+			sig = possibleSigs[i]
+			sigFound = true
+		}
+	}
+
+	return userID, sig
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

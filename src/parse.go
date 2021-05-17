@@ -96,7 +96,7 @@ const (
 	//                     TLS Commands
 	//                   //=====================
 	cmdRegister //       //0000_0000_0000_0001
-	cmdNewToken //       //0000_0000_0000_0010
+	cmdLogin    //       //0000_0000_0000_0010
 	//                   //=====================
 	//                     Through Commands (To Third Party)
 	//                   //=====================
@@ -120,7 +120,7 @@ const (
 var commandMap map[int64]ClientCmd = map[int64]ClientCmd{
 	1<<0 + 0: cmdEmpty,
 	1<<0 + 1: cmdRegister,
-	1<<0 + 2: cmdNewToken,
+	1<<0 + 2: cmdLogin,
 	1<<4 + 0: cmdAction,
 	1<<4 + 1: cmdObserve,
 	1<<5 + 0: cmdGetUser,
@@ -193,7 +193,7 @@ func switchOnCommand(header RequestHeader, bodyFactories RequestBodyFactories, i
 		res = register(header, bodyFactories, isSecureConnection)
 		break
 
-	case cmdNewToken:
+	case cmdLogin:
 		res = login(header, bodyFactories, isSecureConnection)
 		break
 

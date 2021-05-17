@@ -49,7 +49,7 @@ var tlsConfig tls.Config = tls.Config{}
 // This should never change during runtime!
 var secureMap map[ClientCmd]bool = map[ClientCmd]bool{
 	cmdRegister: true,
-	cmdNewToken: true,
+	cmdLogin:    true,
 }
 
 type UserInfo struct {
