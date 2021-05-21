@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"log"
+	"os"
 )
 
 type ServerTask func() (func(), error)
@@ -18,8 +20,12 @@ var serverInitTaskList []ServerTask = []ServerTask{
 
 func main() {
 	for _, task := range serverInitTaskList {
-		defer invokeServerStartup(task)
+		cleanup := invokeServerStartup(task)
+		defer cleanup()
 	}
+
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
+	log.Println("Cleaning Up!")
 }
 
 //// Utility Functions

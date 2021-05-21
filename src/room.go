@@ -19,18 +19,18 @@ const gameAtomicCounter string = "gameCountInteger"
 const emptyName string = "empty"
 
 func startRoomsSystem() (func(), error) {
-	var dummyContainer int64 = 0
+	// var dummyContainer int64 = 0
 
-	err := masterRedis.Do(radix.Cmd(&dummyContainer, "SETNX", gameAtomicCounter, "0"))
-	if err != nil {
-		return nil, err
-	}
+	// err := masterRedis.Do(radix.Cmd(&dummyContainer, "SETNX", gameAtomicCounter, "0"))
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	return roomsSystemCleanup, nil
+	return cleanUpRoomSystem, nil
 }
 
-func roomsSystemCleanup() {
-	// If there is any cleanup that needs doing.
+func cleanUpRoomSystem() {
+	log.Println("Cleaning Up Room Logic")
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

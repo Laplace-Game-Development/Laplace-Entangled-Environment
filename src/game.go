@@ -11,7 +11,11 @@ func startGameLogic() (func(), error) {
 	// exec node example.js --binding=5011
 
 	log.Println("Game Logic is not implemented!")
-	return func() {}, nil
+	return cleanUpGameLogic, nil
+}
+
+func cleanUpGameLogic() {
+	log.Println("Cleaning Up Game Logic")
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

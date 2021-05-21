@@ -27,3 +27,6 @@ PAWthorne-server
 
 # Pesky Node Stuffs
 **node_modules
+
+# Pesky Debug Stuffs
+**bin

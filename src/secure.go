@@ -80,7 +80,7 @@ func startEncryption() (func(), error) {
 }
 
 func cleanUpEncryption() {
-	log.Println("Encryption Goes Beep Boop!")
+	log.Println("Cleaning Up Encryption Logic")
 }
 
 // Secure the current TCP Listener connection. Return True if a new Connection was created

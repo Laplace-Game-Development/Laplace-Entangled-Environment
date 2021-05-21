@@ -14,7 +14,7 @@ import (
 // Handler Constants
 
 // Time for shutdown. Quitting Mid Handle is really bad. This should be longer than any duration
-const shutdownDuration time.Duration = 10 * time.Minute
+const shutdownDuration time.Duration = 10 * time.Second
 
 // Client TCP Settings
 const ioDeadline time.Duration = 5 * time.Millisecond
@@ -57,9 +57,12 @@ func startListener() (func(), error) {
 		return nil, err
 	}
 
-	return func() {
-		listenerThreadPool.Finish(time.Now().Add(shutdownDuration))
-	}, nil
+	return cleanUpListener, nil
+}
+
+func cleanUpListener() {
+	log.Println("Cleaning Up Listener Logic")
+	listenerThreadPool.Finish(time.Now().Add(shutdownDuration))
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
