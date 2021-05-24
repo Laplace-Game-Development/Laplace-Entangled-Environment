@@ -19,9 +19,14 @@ logs
 PAWthorne-server
 
 # VS-Code Editor Files
-.vscode**
+**.vscode
 
 # Generated Certificates and Keys
 **.key
 **.crt
 
+# Pesky Node Stuffs
+**node_modules
+
+# Pesky Debug Stuffs
+**bin

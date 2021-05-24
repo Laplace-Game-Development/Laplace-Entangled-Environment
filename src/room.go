@@ -19,18 +19,18 @@ const gameAtomicCounter string = "gameCountInteger"
 const emptyName string = "empty"
 
 func startRoomsSystem() (func(), error) {
-	var dummyContainer int64 = 0
+	// var dummyContainer int64 = 0
 
-	err := masterRedis.Do(radix.Cmd(&dummyContainer, "SETNX", gameAtomicCounter, "0"))
-	if err != nil {
-		return nil, err
-	}
+	// err := masterRedis.Do(radix.Cmd(&dummyContainer, "SETNX", gameAtomicCounter, "0"))
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	return roomsSystemCleanup, nil
+	return cleanUpRoomSystem, nil
 }
 
-func roomsSystemCleanup() {
-	// If there is any cleanup that needs doing.
+func cleanUpRoomSystem() {
+	log.Println("Cleaning Up Room Logic")
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -40,34 +40,43 @@ func roomsSystemCleanup() {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 type GameWelcomeData struct {
-	id         string
-	numPlayers uint16
-	data       string
+	Id         string
+	NumPlayers uint16 `json:",string"`
+	Data       string
 }
 
 // For Static game details
 type GameMetadata struct {
-	id        string
-	owner     string
-	createdAt int64
-	lastUsed  int64
+	Id        string
+	Owner     string
+	CreatedAt int64 `json:",string"`
+	LastUsed  int64 `json:",string"`
 }
 
-func createGame(data []byte) CommandResponse {
-	// Get Auth ID from data
-	var authID string = "1"
+// Used for Join Game, Leave Game
+type SelectGameArgs struct {
+	GameID string
+}
+
+func createGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
+	if err != nil {
+		log.Printf("Unauthorized Attempt! Error: %v\n", err)
+		return unSuccessfulResponse("Unauthorized!")
+	}
+
 	var atomicClockValue int64
 	var success int
 	var players int
 
-	canCreateGame, err := canCreateGame(authID)
+	canCreateGame, err := canCreateGame(header.UserID)
 
 	if err != nil {
 		return respWithError(err)
 	} else if !canCreateGame {
 		return CommandResponse{
-			data:   GameMetadata{id: "", owner: "", createdAt: 0},
-			digest: json.Marshal,
+			Data:   GameMetadata{Id: "", Owner: "", CreatedAt: 0},
+			Digest: json.Marshal,
 		}
 	}
 	//// We are good to create game
@@ -79,7 +88,7 @@ func createGame(data []byte) CommandResponse {
 	}
 
 	gameID := stringIDFromNumbers(atomicClockValue)
-	metadata := GameMetadata{id: gameID, owner: authID, createdAt: time.Now().UTC().Unix(), lastUsed: time.Now().UTC().Unix()}
+	metadata := GameMetadata{Id: gameID, Owner: header.UserID, CreatedAt: time.Now().UTC().Unix(), LastUsed: time.Now().UTC().Unix()}
 	serializedMetadata := serializeMetadata(metadata)
 
 	// TODO Add Pipelining
@@ -93,7 +102,7 @@ func createGame(data []byte) CommandResponse {
 		return respWithError(err)
 	}
 
-	err = masterRedis.Do(radix.Cmd(&players, "SADD", playerSetPrefix+gameID, authID))
+	err = masterRedis.Do(radix.Cmd(&players, "SADD", playerSetPrefix+gameID, header.UserID))
 	if err != nil || players != 1 {
 		return respWithError(err)
 	}
@@ -107,8 +116,8 @@ func createGame(data []byte) CommandResponse {
 	// As long as the gameID is an identifier.
 
 	return CommandResponse{
-		data:   metadata,
-		digest: json.Marshal,
+		Data:   metadata,
+		Digest: json.Marshal,
 	}
 }
 
@@ -139,48 +148,67 @@ func canCreateGame(authID string) (bool, error) {
 	return success != 0, nil
 }
 
-// Ah yes so Go has the "any" type just like typescript
-func joinGame(data []byte) CommandResponse {
-	// Get Auth ID from data
-	var authID string = "1"
-	var gameID string = "2"
+func joinGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
+	if err != nil {
+		log.Printf("Unauthorized Attempt! Error: %v\n", err)
+		return unSuccessfulResponse("Unauthorized!")
+	}
+
+	args := SelectGameArgs{}
+	err = bodyFactories.parseFactory(&args)
+	if err != nil {
+		log.Printf("Bad Argument! Error: %v\n", err)
+		return unSuccessfulResponse("Bad Arguments!")
+	}
+
 	var gameDataSerialized string
 	var success int
 	var numPlayers uint16
 
-	err := masterRedis.Do(radix.Cmd(&gameDataSerialized, "HGET", gameHashSetName, gameID))
+	err = masterRedis.Do(radix.Cmd(&gameDataSerialized, "HGET", gameHashSetName, args.GameID))
 	if err != nil {
 		return respWithError(err)
-	} else if gameDataSerialized == "(nil)" {
+	} else if gameDataSerialized == "" {
 		return CommandResponse{
-			data:   GameWelcomeData{id: "", numPlayers: 0, data: ""},
-			digest: json.Marshal,
+			Data:   GameWelcomeData{Id: "", NumPlayers: 0, Data: ""},
+			Digest: json.Marshal,
 		}
 	}
 
-	err = masterRedis.Do(radix.Cmd(&success, "SADD", playerSetPrefix+gameID, authID))
+	err = masterRedis.Do(radix.Cmd(&success, "SADD", playerSetPrefix+args.GameID, header.UserID))
 	if err != nil {
 		return respWithError(err)
 	} else if success < 1 {
-		log.Printf("User Tried to Add Themselves More Than Once: " + authID)
+		log.Printf("User Tried to Add Themselves More Than Once: " + args.GameID)
 	}
 
-	err = masterRedis.Do(radix.Cmd(&numPlayers, "SCARD", playerSetPrefix+gameID))
+	err = masterRedis.Do(radix.Cmd(&numPlayers, "SCARD", playerSetPrefix+args.GameID))
 
 	return CommandResponse{
-		data:   GameWelcomeData{id: gameID, numPlayers: numPlayers, data: gameDataSerialized},
-		digest: json.Marshal,
+		Data:   GameWelcomeData{Id: args.GameID, NumPlayers: numPlayers, Data: gameDataSerialized},
+		Digest: json.Marshal,
 	}
 }
 
-func leaveGame(data []byte) CommandResponse {
-	// Get Auth ID from data
-	var authID string = "1"
-	var gameID string = "2"
+func leaveGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
+	if err != nil {
+		log.Printf("Unauthorized Attempt! Error: %v\n", err)
+		return unSuccessfulResponse("Unauthorized!")
+	}
+
+	args := SelectGameArgs{}
+	err = bodyFactories.parseFactory(&args)
+	if err != nil {
+		log.Printf("Bad Argument! Error: %v\n", err)
+		return unSuccessfulResponse("Bad Arguments!")
+	}
+
 	var doesGameExist bool
 	var numPlayers uint16
 
-	err := masterRedis.Do(radix.Cmd(&doesGameExist, "HEXISTS", gameHashSetName, gameID))
+	err = masterRedis.Do(radix.Cmd(&doesGameExist, "HEXISTS", gameHashSetName, args.GameID))
 	if err != nil {
 		return respWithError(err)
 	}
@@ -189,50 +217,59 @@ func leaveGame(data []byte) CommandResponse {
 		return unSuccessfulResponse("Game Does Not Exist!")
 	}
 
-	err = masterRedis.Do(radix.Cmd(&numPlayers, "SREM", playerSetPrefix+gameID, "-1", authID))
+	err = masterRedis.Do(radix.Cmd(&numPlayers, "SREM", playerSetPrefix+args.GameID, "-1", header.UserID))
 	if err != nil {
 		return respWithError(err)
 	} else if numPlayers <= 0 {
-		// TODO replace 0 with superuser ID
-		submitGameForHealthCheck("0", gameID)
+		submitGameForHealthCheck(args.GameID)
 	}
 
 	return successfulResponse()
 }
 
-func deleteGame(data []byte) CommandResponse {
-	// TODO Auth ID should be checked for ownership of room or "0" for super user
-	// Get Auth ID from data
-	var gameID string = "2"
+func deleteGame(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	err := bodyFactories.sigVerify(header.UserID, header.Sig)
+	if err != nil {
+		log.Printf("Unauthorized Attempt! Error: %v\n", err)
+		return unSuccessfulResponse("Unauthorized!")
+	}
+
+	args := SelectGameArgs{}
+	err = bodyFactories.parseFactory(&args)
+	if err != nil {
+		log.Printf("Bad Argument! Error: %v\n", err)
+		return unSuccessfulResponse("Bad Arguments!")
+	}
+
 	var success bool
 
 	// TODO This should be done with Pipelining!!!
-	err := masterRedis.Do(radix.Cmd(&success, "HDEL", gameHashSetName, gameID))
+	err = masterRedis.Do(radix.Cmd(&success, "HDEL", gameHashSetName, args.GameID))
 	if err != nil {
 		return respWithError(err)
 	} else if !success {
 		return respWithError(err)
 	}
 
-	err = masterRedis.Do(radix.Cmd(&success, "HDEL", metadataHashSetName, gameID))
+	err = masterRedis.Do(radix.Cmd(&success, "HDEL", metadataHashSetName, args.GameID))
 	if err != nil {
 		return respWithError(err)
 	} else if !success {
-		log.Println("Failed to Delete Metadata at: " + metadataHashSetName + " <> " + gameID)
+		log.Println("Failed to Delete Metadata at: " + metadataHashSetName + " <> " + args.GameID)
 	}
 
-	err = masterRedis.Do(radix.Cmd(&success, "HDEL", metadataHashSetName, gameID))
+	err = masterRedis.Do(radix.Cmd(&success, "HDEL", metadataHashSetName, args.GameID))
 	if err != nil {
 		return respWithError(err)
 	} else if !success {
-		log.Println("Failed to Delete Metadata at: " + metadataHashSetName + " <> " + gameID)
+		log.Println("Failed to Delete Metadata at: " + metadataHashSetName + " <> " + args.GameID)
 	}
 
-	err = masterRedis.Do(radix.Cmd(&success, "SUNIONSTORE", playerSetPrefix+gameID, emptyName))
+	err = masterRedis.Do(radix.Cmd(&success, "SUNIONSTORE", playerSetPrefix+args.GameID, emptyName))
 	if err != nil {
 		return respWithError(err)
 	} else if !success {
-		log.Println("Failed to Remove Players at: " + playerSetPrefix + gameID)
+		log.Println("Failed to Remove Players at: " + playerSetPrefix + args.GameID)
 	}
 
 	return successfulResponse()
@@ -243,17 +280,27 @@ func getRoomHealth(gameID string) (time.Time, error) {
 
 	err := masterRedis.Do(radix.Cmd(&marshalledMetadata, "HGET", metadataHashSetName, gameID))
 	if err != nil {
-		return time.Now(), err
+		return time.Now().UTC(), err
 	} else if len(marshalledMetadata) <= 0 {
-		return time.Now(), errors.New("Game Metadata does not seem to exists. GameID: " + gameID)
+		return time.Now().UTC(), errors.New("Game Metadata does not seem to exists. GameID: " + gameID)
 	}
 
 	metadata, err := unserializeMetadata(marshalledMetadata)
 	if err != nil {
-		return time.Now(), err
+		return time.Now().UTC(), err
 	}
 
-	return time.Unix(metadata.lastUsed, 0), nil
+	return time.Unix(metadata.LastUsed, 0), nil
+}
+
+func isUserInGame(userID string, gameID string) (bool, error) {
+	var isInGame int
+	err := masterRedis.Do(radix.Cmd(&isInGame, "SISMEMBER", playerSetPrefix+gameID, userID))
+	if err != nil {
+		return false, err
+	}
+
+	return isInGame > 0, nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -303,18 +350,4 @@ func unserializeMetadata(bytes string) (GameMetadata, error) {
 	}
 
 	return result, nil
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-////
-//// Game Actions
-////
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-func applyAction(data []byte) CommandResponse {
-	return unSuccessfulResponse("Command is Not Implemented!")
-}
-
-func getGameData(data []byte) CommandResponse {
-	return unSuccessfulResponse("Command is Not Implemented!")
 }

@@ -30,5 +30,10 @@ func startDatabase() (func(), error) {
 		return nil, err
 	}
 
-	return func() { masterRedis.Close() }, nil
+	return cleanUpDatabase, nil
+}
+
+func cleanUpDatabase() {
+	log.Println("Cleaning Up Database Logic")
+	masterRedis.Close()
 }

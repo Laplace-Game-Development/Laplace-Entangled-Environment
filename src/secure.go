@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/tls"
 	"encoding/hex"
@@ -9,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/mediocregopher/radix/v3"
@@ -34,6 +37,10 @@ const escapeChar byte = byte('~')
 // Token Configurables
 const tokenLength int = 256
 const tokenStaleTime time.Duration = time.Minute * 5
+const superUserTokenCount int = 10
+
+// Super User Configurables
+const superUserID string = "-1"
 
 // This will be assigned on startup then left unchanged
 var tlsConfig tls.Config = tls.Config{}
@@ -42,7 +49,18 @@ var tlsConfig tls.Config = tls.Config{}
 // This should never change during runtime!
 var secureMap map[ClientCmd]bool = map[ClientCmd]bool{
 	cmdRegister: true,
-	cmdNewToken: true,
+	cmdLogin:    true,
+}
+
+type UserInfo struct {
+	AuthID   string
+	Username string
+}
+
+type SuperUserRequest struct {
+	Header             RequestHeader
+	BodyFactories      RequestBodyFactories
+	IsSecureConnection bool
 }
 
 func startEncryption() (func(), error) {
@@ -62,22 +80,24 @@ func startEncryption() (func(), error) {
 }
 
 func cleanUpEncryption() {
-	log.Println("Encryption Goes Beep Boop!")
+	log.Println("Cleaning Up Encryption Logic")
 }
 
-func monadicallySecure(clientConn *ClientConn, cmd ClientCmd) error {
-	if clientConn.isSecured || cmd != cmdStartTLS {
-		return nil
+// Secure the current TCP Listener connection. Return True if a new Connection was created
+// Return an error if somethign went wrong
+func secureTCPConnIfNeeded(clientConn *TCPClientConn, prefix TCPRequestPrefix) (bool, error) {
+	if clientConn.isSecured || !prefix.NeedsSecurity {
+		return false, nil
 	}
 
 	newConn := tls.Server(clientConn.conn, &tlsConfig)
 	if newConn == nil {
-		return errors.New("newConn was nil!!! Something went wrong!")
+		return false, errors.New("newConn was nil!!! Something went wrong!")
 	}
 
 	clientConn.conn = newConn
 	clientConn.isSecured = true
-	return nil
+	return true, nil
 }
 
 func needsSecurity(cmd ClientCmd) bool {
@@ -85,45 +105,80 @@ func needsSecurity(cmd ClientCmd) bool {
 	return exists && result
 }
 
-func register(data []byte) CommandResponse {
-	// cmd := data[0:2]
-	seperator := data[2:6] // 4 bytes for a utf-32 character
-	content := data[6:]
-	escape := []byte{escapeChar}
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Registration
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
-	username, next := strTokWithEscape(seperator, escape, content, 0)
-	if username == nil {
-		return rawUnsuccessfulResponse("Illegal Input!")
+type RegisterCommandBody struct {
+	Username string
+	Password string
+}
+
+// TODO Add rate Limiting
+func register(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	if !isSecureConnection {
+		return rawUnsuccessfulResponse("Unsecure Connection!")
 	}
 
-	password, _ := strTokWithEscape(seperator, escape, content, next)
-	if password == nil {
+	rqBody := RegisterCommandBody{}
+	bodyFactories.parseFactory(&rqBody)
+
+	if rqBody.Username == "" {
 		return rawUnsuccessfulResponse("Illegal Input!")
+	} else if !passwordIsStrong(rqBody.Password) {
+		return rawUnsuccessfulResponse("Weak Password!")
 	}
 
-	// We can make other fields later!
-
-	success, err := createAccount(username, password)
+	success, err := createAccount(rqBody.Username, rqBody.Password)
 	if err != nil {
 		return respWithError(err)
 	} else if success {
-		return rawSuccessfulResponseBytes(username)
+		return rawSuccessfulResponse(rqBody.Username)
 	} else {
 		return rawUnsuccessfulResponse("Username Already Exists!")
 	}
 }
 
-func createAccount(username []byte, password []byte) (bool, error) {
+func passwordIsStrong(password string) bool {
+	length := len(password)
+	hasUpper, hasLower, hasNumber, hasSymbol, hasMystery := false, false, false, false, false
+	passwordIsStrong := false
+	var runic rune
+
+	for _, c := range password {
+		runic = rune(c)
+		hasUpper = hasUpper || (runic >= 'A' && runic <= 'Z')
+		hasLower = hasLower || (runic >= 'a' && runic <= 'z')
+		hasNumber = hasNumber || (runic >= '0' && runic <= '9')
+		hasSymbol = hasNumber || (runic >= '!' && runic <= '/') ||
+			(runic >= ':' && runic <= '@') ||
+			(runic >= '[' && runic <= '`') ||
+			(runic >= '{' && runic <= '~')
+		hasMystery = runic > 127
+
+		if hasMystery || (hasUpper && hasLower && hasNumber) || (hasUpper && hasLower && hasSymbol) {
+			passwordIsStrong = true
+			break
+		}
+	}
+
+	return length >= 8 && passwordIsStrong
+}
+
+func createAccount(username string, password string) (bool, error) {
 	if len(username) > redisKeyMax {
 		return false, errors.New("Attempting To Store Too Large of a Username!")
 	}
 
 	var newID int
 	var success int
-	checksum := sha512.Sum512(password)
+	checksum := sha512.Sum512([]byte(password))
 	checksumHex := hex.EncodeToString(checksum[:])
 	castedName := string(username)
 
+	// It should be noted, username could be encoded in any type of way.... it could be a mess of bytes... don't trust it on reads.
 	// TODO add Pipelining
 	err := masterRedis.Do(radix.Cmd(&success, "HSETNX", userPassTable, castedName, checksumHex))
 	if err != nil {
@@ -154,46 +209,48 @@ func createAccount(username []byte, password []byte) (bool, error) {
 	return err != nil, err
 }
 
-func login(data []byte) CommandResponse {
-	// cmd := data[0:2]
-	seperator := data[2:6] // 4 bytes for a utf-32 character
-	content := data[6:]
-	escape := []byte{escapeChar}
-
-	username, next := strTokWithEscape(seperator, escape, content, 0)
-	if username == nil {
-		return rawUnsuccessfulResponse("Illegal Input!")
-	}
-
-	password, _ := strTokWithEscape(seperator, escape, content, next)
-	if password == nil {
-		return rawUnsuccessfulResponse("Illegal Input!")
-	}
-
-	if !isValidLogin(username, password) {
-		return rawUnsuccessfulResponse("Illegal Input!")
-	}
-
-	authID, err := getAuthID(username)
-	if err != nil {
-		return respWithError(err)
-	}
-
-	token, err := constructNewToken(authID)
-	if err != nil {
-		return respWithError(err)
-	}
-
-	return rawSuccessfulResponseBytes(token)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Login
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+type LoginCommandBody struct {
+	Username string
+	Password string
 }
 
-func isValidLogin(username []byte, password []byte) bool {
+func login(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	if !isSecureConnection {
+		return rawUnsuccessfulResponse("Unsecure Connection!")
+	}
+
+	rqBody := LoginCommandBody{}
+	bodyFactories.parseFactory(&rqBody)
+
+	if !isValidLogin(rqBody.Username, rqBody.Password) {
+		return rawUnsuccessfulResponse("Illegal Input!")
+	}
+
+	authID, err := getAuthID(rqBody.Username)
+	if err != nil {
+		return respWithError(err)
+	}
+
+	token, _, err := constructNewToken(authID)
+	if err != nil {
+		return respWithError(err)
+	}
+
+	return rawSuccessfulResponseBytes(&token)
+}
+
+func isValidLogin(username string, password string) bool {
 	if len(username) > redisKeyMax {
 		return false
 	}
 
 	var actualChecksumHex string
-	reqChecksum := sha512.Sum512(password)
+	reqChecksum := sha512.Sum512([]byte(password))
 	reqChecksumHex := hex.EncodeToString(reqChecksum[:])
 	castedName := string(username)
 
@@ -201,7 +258,7 @@ func isValidLogin(username []byte, password []byte) bool {
 	return err != nil || actualChecksumHex != reqChecksumHex
 }
 
-func getAuthID(username []byte) (string, error) {
+func getAuthID(username string) (string, error) {
 	if len(username) > redisKeyMax {
 		return "", errors.New("Attempting To Use Too Large of a Username!")
 	}
@@ -217,39 +274,44 @@ func getAuthID(username []byte) (string, error) {
 	return authID, nil
 }
 
-func constructNewToken(authID string) ([]byte, error) {
+func constructNewToken(authID string) ([]byte, time.Time, error) {
 	authIDSet := authIDSetPrefix + authID
 	token := make([]byte, tokenLength)
-	staleDateTime := time.Now().Add(staleGameDuration).Unix()
+	staleDateTime := time.Now().UTC().Add(staleGameDuration)
 
 	n, err := rand.Read(token)
 	if err != nil {
-		return nil, err
+		return nil, staleDateTime, err
 	} else if n < tokenLength {
-		return nil, errors.New("rand.Read did not return full Token!")
+		return nil, staleDateTime, errors.New("rand.Read did not return full Token!")
 	}
 
 	err = masterRedis.Do(radix.Cmd(nil, "HMSET", authIDSet,
 		authIDSetTokenField, string(token),
-		authIDSetTokenStaleDateTimeField, fmt.Sprintf("%d", staleDateTime),
+		authIDSetTokenStaleDateTimeField, fmt.Sprintf("%d", staleDateTime.Unix()),
 		authIDSetTokenUseCounter, "0"))
 	if err != nil {
-		return nil, err
+		return nil, staleDateTime, err
 	}
 
-	return token, nil
+	return token, staleDateTime, nil
 }
 
-type UserInfo struct {
-	authID   string
-	username string
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Public AuthID Command Handler
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+type GetUserCommandBody struct {
+	Username string
 }
 
-func getUserByUsername(data []byte) CommandResponse {
+func getUser(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+	rqBody := GetUserCommandBody{}
+	bodyFactories.parseFactory(&rqBody)
+
 	var authID string
-	username := string(data[2:])
-
-	err := masterRedis.Do(radix.Cmd(&authID, "HGET", userAuthIDTable, username))
+	err := masterRedis.Do(radix.Cmd(&authID, "HGET", userAuthIDTable, rqBody.Username))
 	if err != nil {
 		return respWithError(err)
 	} else if len(authID) <= 0 {
@@ -257,7 +319,100 @@ func getUserByUsername(data []byte) CommandResponse {
 	}
 
 	return CommandResponse{
-		data:   UserInfo{authID: authID, username: username},
-		digest: json.Marshal,
+		Data:   UserInfo{AuthID: authID, Username: rqBody.Username},
+		Digest: json.Marshal,
 	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Utility Security Functions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// When using, make sure to defer SuperUserRequest.Cleanup on a succssful call
+func requestWithSuperUser(isTask bool, cmd ClientCmd, args interface{}) (SuperUserRequest, error) {
+	// shortcut bodyfactory using reflection
+	bodyFactories := RequestBodyFactories{
+		parseFactory: func(ptr interface{}) error {
+			ptrValue := reflect.ValueOf(ptr)
+			argsVal := reflect.ValueOf(args)
+			ptrValue.Elem().Set(argsVal)
+			return nil
+		},
+		sigVerify: func(userID string, userSig string) error {
+			return nil
+		},
+	}
+
+	// Body Start is only used in main.go and is not necessary for a manual request command
+	header := RequestHeader{Command: cmd, UserID: superUserID}
+
+	return SuperUserRequest{Header: header, BodyFactories: bodyFactories, IsSecureConnection: true}, nil
+}
+
+// Cleanup SuperUser Code
+func sigVerification(userID string, signature string, content *[]byte) error {
+	authIDSet := authIDSetPrefix + userID
+	redisReply := make([]string, 3)
+	err := masterRedis.Do(radix.Cmd(&redisReply, "HMGET", authIDSet,
+		authIDSetTokenField,
+		authIDSetTokenStaleDateTimeField,
+		authIDSetTokenUseCounter))
+
+	if err != nil {
+		return err
+	}
+
+	token := []byte(redisReply[0])
+	counterByte := []byte(redisReply[2])
+	staleTimeUnix, err := strconv.Atoi(redisReply[1])
+	if err != nil {
+		return err
+	}
+
+	staleTime := time.Unix(int64(staleTimeUnix), 0)
+	counter, err := strconv.Atoi(redisReply[2])
+	if err != nil {
+		return err
+	}
+
+	if staleTime.Before(time.Now().UTC()) {
+		return errors.New("Token Is Stale!")
+	}
+
+	contentLen := len(*content)
+	tokenLen := len(token)
+	counterLen := len(redisReply[2])
+
+	input := make([]byte, contentLen+tokenLen+counterLen)
+	err = concat(&input, content, 0)
+	if err != nil {
+		return err
+	}
+
+	err = concat(&input, &token, contentLen)
+	if err != nil {
+		return err
+	}
+
+	err = concat(&input, &counterByte, contentLen+tokenLen)
+	if err != nil {
+		return err
+	}
+
+	checksumByte := sha256.Sum256(input)
+	checksum := string(checksumByte[:])
+	if signature == checksum {
+		err = masterRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
+			authIDSetTokenUseCounter, fmt.Sprintf("%d", counter+1)))
+		if err != nil {
+			return err
+		}
+
+		// SUCCESS!
+		return nil
+	}
+
+	return errors.New(fmt.Sprintf("Signature is Incorrect!: %s vs %s", signature, checksum))
 }

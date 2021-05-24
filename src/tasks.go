@@ -10,7 +10,6 @@ import (
 
 	"github.com/mediocregopher/radix/v3"
 	"github.com/pebbe/zmq4"
-	"github.com/robfig/cron/v3"
 )
 
 // ZeroMQ/Task Server Settings
@@ -25,10 +24,10 @@ const proxyControlPort string = ":5567"
 const healthTaskQueue string = "healthTaskQueue"
 
 // Configurables
-var emptyQueueSleepDuration time.Duration = time.Duration(time.Minute)
-var eventHealthTaskCapacity uint8 = 50
-var magicRune rune = '~'
-var staleGameDuration time.Duration = time.Duration(time.Minute * 5)
+const emptyQueueSleepDuration time.Duration = time.Duration(time.Minute)
+const eventHealthTaskCapacity uint8 = 50
+const magicRune rune = '~'
+const staleGameDuration time.Duration = time.Duration(time.Minute * 5)
 
 // Task Prefixes
 const healthTaskPrefix string = "healthTask"
@@ -38,8 +37,6 @@ var masterZeroMQ *zmq4.Context = nil
 var zeroMQProxyControl *zmq4.Socket = nil
 var zeroMQWorkerChannelIn chan bool = nil
 var zeroMQWorkerChannelOut chan bool = nil
-var masterCron *cron.Cron = nil
-var cronEntries = make(chan cron.EntryID)
 
 func startTaskQueue() (func(), error) {
 	// FOR CI:
@@ -84,27 +81,7 @@ func startTaskQueue() (func(), error) {
 		go startTaskWorker(i, zeroMQWorkerChannelIn, zeroMQWorkerChannelOut)
 	}
 
-	// Start Events/Scheduler
-	err = schedule()
-	if err != nil {
-		return nil, err
-	}
-
 	return cleanUpTaskQueue, nil
-}
-
-func schedule() error {
-	masterCron = cron.New(cron.WithSeconds())
-
-	// Schedule Task Events Here
-	entryID, err := masterCron.AddFunc("5 * * * * *", eventCheckHealth)
-	if err != nil {
-		return err
-	}
-
-	cronEntries <- entryID
-
-	return nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -241,18 +218,9 @@ func cleanUpTaskQueue() {
 	}
 
 	log.Println("Task Workers Cleanup Complete!")
-
-	log.Println("Cleaning Cron Jobs!")
-	ctx := masterCron.Stop()
-	select {
-	case <-ctx.Done():
-		log.Println(ctx.Err())
-	default:
-	}
-	log.Println("Cron Jobs Clean!")
 }
 
-func sendTaskToWorkers(msgs []string) error {
+func sendTasksToWorkers(msgs []string) error {
 	// Proxy Facing Publisher
 	zmqPUB, err := masterZeroMQ.NewSocket(zmq4.Type(zmq4.PUB))
 	if err != nil {
@@ -288,7 +256,7 @@ func sendTaskToWorkers(msgs []string) error {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-func submitGameForHealthCheck(authID string, gameID string) error {
+func submitGameForHealthCheck(gameID string) error {
 	err := masterRedis.Do(radix.Cmd(nil, "RPUSH", healthTaskQueue, gameID))
 	if err != nil {
 		return err
@@ -299,41 +267,13 @@ func submitGameForHealthCheck(authID string, gameID string) error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
-//// Tasks Events -- Cron Subscribed Functions
-////
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-func eventCheckHealth() {
-	gameIDSlice := make([]string, eventHealthTaskCapacity)
-	gameIDSlicePrefixed := make([]string, eventHealthTaskCapacity)
-
-	err := masterRedis.Do(radix.Cmd(&gameIDSlice, "LPOP", healthTaskQueue, fmt.Sprintf("%d", eventHealthTaskCapacity)))
-	if err != nil {
-		log.Fatalln("Trouble Using Health Event: " + err.Error())
-	}
-
-	if len(gameIDSlice) == 0 {
-		return
-	}
-
-	temp := make([]string, 1)
-
-	for i, s := range gameIDSlice {
-		temp[0] = s
-		gameIDSlicePrefixed[i] = constructTaskWithPrefix(healthTaskPrefix, temp)
-	}
-
-	err = sendTaskToWorkers(gameIDSlice)
-	if err != nil {
-		log.Fatalf("Trouble Using Health Event! Error: %v", err.Error())
-	}
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-////
 //// Tasks Working -- Parsed Worker Functions
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+var mapPrefixToWork map[string]func([]string) error = map[string]func([]string) error{
+	healthTaskPrefix: healthTaskWork,
+}
 
 func onTask(msg string) error {
 	log.Println("Got Message! | " + msg)
@@ -344,11 +284,13 @@ func onTask(msg string) error {
 
 	task, args := parseTask(msg)
 
-	if task == healthTaskPrefix {
-		return healthTaskWork(args)
-	} else {
+	work, exists := mapPrefixToWork[task]
+
+	if !exists {
 		return errors.New("Unknown Task Sent to Task Worker! MSG: " + msg)
 	}
+
+	return work(args)
 }
 
 func healthTaskWork(args []string) error {
@@ -361,15 +303,19 @@ func healthTaskWork(args []string) error {
 		return err
 	}
 
-	if gameTime.Add(staleGameDuration).Before(time.Now()) {
-		resp := deleteGame([]byte(args[0]))
-		if resp.serverError != nil {
-			return resp.serverError
+	if gameTime.Add(staleGameDuration).Before(time.Now().UTC()) {
+		superUserRequest, err := requestWithSuperUser(true, cmdGameDelete, SelectGameArgs{args[0]})
+		if err != nil {
+			return err
+		}
+
+		resp := deleteGame(superUserRequest.Header, superUserRequest.BodyFactories, superUserRequest.IsSecureConnection)
+		if resp.ServerError != nil {
+			return resp.ServerError
 		}
 
 	} else {
-		// TODO replace 0 with super user
-		submitGameForHealthCheck("0", args[0])
+		submitGameForHealthCheck(args[0])
 	}
 
 	return nil
