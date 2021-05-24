@@ -68,18 +68,25 @@ export function isServer(){
 
 /**
  * Send Gamestate to the client and/or wait for a response
- * @param {any} state JS Object of Game State
+ * @param {any} state JS Object of Game State to be saved
+ * @param {any} relay JS Object of Relayed State to be sent
  * @param {function} callback Callback Function once Message is received
  * 
  */
-export function sendGameState(state, callback) {
+export function sendGameState(state, relay, callback) {
     /*
      * Alone, sock.recieve with no configuration will block 
      * the Application until a message is received
      */
 
+    let payload = {
+        game: state,
+        relay: relay,
+        v: "alpha",
+    }
+
     if(hasReceivedRequest){
-        sock.send(["", JSON.stringify(state)]).then(
+        sock.send(["", JSON.stringify(payload)]).then(
             socketReceive.bind(null, callback),
             onError.bind(null, callback)
         );
@@ -144,12 +151,23 @@ function socketReceive(callback) {
     sock.on("message", onReceiveSuccess.bind(null, callback));
 }
 
-function onReceiveSuccess(callback, messages) {
+function onReceiveSuccess(callback, message) {
     console.log("Laplace Entangled Recieved: ");
-    console.log(messages);
+    console.log(message);
 
     hasReceivedRequest = true;
-    callback(null, messages);
+
+    try {
+        parsedObject = JSON.parse(message)
+        if(message["state"] === undefined || message["relay"] === undefined){
+            throw new Error("Received Message Does Not Contained Required Fields!");
+        }
+        
+        callback(null, message.state, message.relay);
+    } catch(err) {
+        console.error(err);
+        callback(err, {}, {});
+    }
 }
 
 function onError(callback, error){

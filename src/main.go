@@ -9,13 +9,13 @@ import (
 type ServerTask func() (func(), error)
 
 var serverInitTaskList []ServerTask = []ServerTask{
-	startGameLogic,
 	startDatabase,
 	startEncryption,
 	startRoomsSystem,
 	startTaskQueue,
 	startCronScheduler,
-	startListener, // Dependent on startEncryption
+	startGameLogic, // Dependent on startTaskQueue
+	startListener,  // Dependent on startEncryption
 }
 
 func main() {

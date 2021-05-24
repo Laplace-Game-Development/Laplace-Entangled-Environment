@@ -293,6 +293,16 @@ func getRoomHealth(gameID string) (time.Time, error) {
 	return time.Unix(metadata.LastUsed, 0), nil
 }
 
+func isUserInGame(userID string, gameID string) (bool, error) {
+	var isInGame int
+	err := masterRedis.Do(radix.Cmd(&isInGame, "SISMEMBER", playerSetPrefix+gameID, userID))
+	if err != nil {
+		return false, err
+	}
+
+	return isInGame > 0, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
 //// Utility Functions
