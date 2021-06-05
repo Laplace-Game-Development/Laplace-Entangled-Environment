@@ -1,4 +1,4 @@
-package main
+package route
 
 import (
 	"context"
@@ -9,44 +9,45 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"laplace-entangled-env.com/internal/policy"
+	"laplace-entangled-env.com/internal/util"
 )
 
 // Handler Constants
 
 // Time for shutdown. Quitting Mid Handle is really bad. This should be longer than any duration
-const shutdownDuration time.Duration = 10 * time.Second
+const ShutdownDuration time.Duration = 10 * time.Second
 
 // Client TCP Settings
-const ioDeadline time.Duration = 5 * time.Millisecond
-const listeningTCPIpAddress string = ""
-const listeningTCPPortNumber string = "26005"
-const commandBytes = 3
-const numberOfGames = 20
-const throttleGames = false
+const IoDeadline time.Duration = 5 * time.Millisecond
+const ListeningTCPIpAddress string = ""
+const ListeningTCPPortNumber string = "26005"
+const CommandBytes = 3
 
 // 5 is a good number for testing, but a better number would be much higher.
-const numberOfTCPThreads = 5
+const NumberOfTCPThreads = 5
 
 // These should not change during runtime
-var malformedDataMsg []byte = []byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}")
-var malformedDataMsgLen int = len([]byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}"))
+var MalformedDataMsg []byte = []byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}")
+var MalformedDataMsgLen int = len([]byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}"))
 
 // Command Logic Settings
-const createGameAuthSliceLow = 2
-const createGameAuthSliceHigh = 10
+const CreateGameAuthSliceLow = 2
+const CreateGameAuthSliceHigh = 10
 
 // HTTP Configurations
-const httpHost string = "127.0.0.1"
-const httpPort string = ":8080"
+const HttpHost string = "127.0.0.1"
+const HttpPort string = ":8080"
 
 //// Global Variables | Singletons
 
 // 1 for TCP
 // 1 For HTTP
 // 1 For WebSocket
-var listenerThreadPool ThreadPool = NewThreadPool(3)
+var listenerThreadPool util.ThreadPool = util.NewThreadPool(3)
 
-func startListener() (func(), error) {
+func StartListener() (func(), error) {
 	err := listenerThreadPool.SubmitFuncUnsafe(startTCPListening)
 	if err != nil {
 		return nil, err
@@ -62,7 +63,7 @@ func startListener() (func(), error) {
 
 func cleanUpListener() {
 	log.Println("Cleaning Up Listener Logic")
-	listenerThreadPool.Finish(time.Now().Add(shutdownDuration))
+	listenerThreadPool.Finish(time.Now().Add(ShutdownDuration))
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -71,7 +72,7 @@ func cleanUpListener() {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-func calculateResponse(requestHeader RequestHeader, bodyFactories RequestBodyFactories, isSecured bool) ([]byte, error) {
+func calculateResponse(requestHeader policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecured bool) ([]byte, error) {
 	// parse.go
 	return switchOnCommand(requestHeader, bodyFactories, isSecured)
 }
@@ -83,18 +84,18 @@ func calculateResponse(requestHeader RequestHeader, bodyFactories RequestBodyFac
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 // This should never change during runtime!
-var postOnlyCmdMap map[ClientCmd]bool = map[ClientCmd]bool{
-	cmdError:      false,
-	cmdEmpty:      false,
-	cmdRegister:   true,
-	cmdLogin:      true,
-	cmdAction:     true,
-	cmdObserve:    true,
-	cmdGetUser:    true,
-	cmdGameCreate: true,
-	cmdGameJoin:   true,
-	cmdGameLeave:  true,
-	cmdGameDelete: true,
+var postOnlyCmdMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
+	policy.CmdError:      false,
+	policy.CmdEmpty:      false,
+	policy.CmdRegister:   true,
+	policy.CmdLogin:      true,
+	policy.CmdAction:     true,
+	policy.CmdObserve:    true,
+	policy.CmdGetUser:    true,
+	policy.CmdGameCreate: true,
+	policy.CmdGameJoin:   true,
+	policy.CmdGameLeave:  true,
+	policy.CmdGameDelete: true,
 }
 
 type UserSigTuple struct {
@@ -103,22 +104,22 @@ type UserSigTuple struct {
 }
 
 func startHTTPListening(ctx context.Context) {
-	http.HandleFunc("/empty/", getHttpHandler(cmdEmpty))
-	http.HandleFunc("/error/", getHttpHandler(cmdError))
-	http.HandleFunc("/register/", getHttpHandler(cmdRegister))
-	http.HandleFunc("/login/", getHttpHandler(cmdLogin))
-	http.HandleFunc("/action/", getHttpHandler(cmdAction))
-	http.HandleFunc("/observe/", getHttpHandler(cmdObserve))
-	http.HandleFunc("/user/", getHttpHandler(cmdGetUser))
-	http.HandleFunc("/game/create/", getHttpHandler(cmdGameCreate))
-	http.HandleFunc("/game/join/", getHttpHandler(cmdGameJoin))
-	http.HandleFunc("/game/leave/", getHttpHandler(cmdGameLeave))
-	http.HandleFunc("/game/delete/", getHttpHandler(cmdGameDelete))
+	http.HandleFunc("/empty/", getHttpHandler(policy.CmdEmpty))
+	http.HandleFunc("/error/", getHttpHandler(policy.CmdError))
+	http.HandleFunc("/register/", getHttpHandler(policy.CmdRegister))
+	http.HandleFunc("/login/", getHttpHandler(policy.CmdLogin))
+	http.HandleFunc("/action/", getHttpHandler(policy.CmdAction))
+	http.HandleFunc("/observe/", getHttpHandler(policy.CmdObserve))
+	http.HandleFunc("/user/", getHttpHandler(policy.CmdGetUser))
+	http.HandleFunc("/game/create/", getHttpHandler(policy.CmdGameCreate))
+	http.HandleFunc("/game/join/", getHttpHandler(policy.CmdGameJoin))
+	http.HandleFunc("/game/leave/", getHttpHandler(policy.CmdGameLeave))
+	http.HandleFunc("/game/delete/", getHttpHandler(policy.CmdGameDelete))
 
 	http.HandleFunc("*", http.NotFound)
 
 	serverConfig := http.Server{
-		Addr:        httpHost + httpPort,
+		Addr:        HttpHost + HttpPort,
 		TLSConfig:   &tlsConfig, // Found in secure.go
 		BaseContext: func(l net.Listener) context.Context { return ctx },
 	}
@@ -130,13 +131,13 @@ func startHTTPListening(ctx context.Context) {
 	}
 }
 
-func getHttpHandler(command ClientCmd) func(writer http.ResponseWriter, req *http.Request) {
+func getHttpHandler(command policy.ClientCmd) func(writer http.ResponseWriter, req *http.Request) {
 	return func(writer http.ResponseWriter, req *http.Request) {
 		handleHttp(command, writer, req)
 	}
 }
 
-func handleHttp(clientCmd ClientCmd, writer http.ResponseWriter, req *http.Request) {
+func handleHttp(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *http.Request) {
 	if checkPost(clientCmd, writer, req) {
 		return
 	}
@@ -148,28 +149,28 @@ func handleHttp(clientCmd ClientCmd, writer http.ResponseWriter, req *http.Reque
 
 	userID, sig := parseHeaderInfo(req, &body)
 
-	requestHeader := RequestHeader{
+	requestHeader := policy.RequestHeader{
 		Command: clientCmd,
 		UserID:  userID,
 		Sig:     sig,
 	}
 
-	bodyFactories := RequestBodyFactories{
-		parseFactory: func(ptr interface{}) error {
+	bodyFactories := policy.RequestBodyFactories{
+		ParseFactory: func(ptr interface{}) error {
 			return json.Unmarshal(body, ptr)
 		},
-		sigVerify: func(userID string, userSig string) error {
-			return sigVerification(userID, userSig, &body)
+		SigVerify: func(userID string, userSig string) error {
+			return SigVerification(userID, userSig, &body)
 		},
 	}
 
 	calculateResponse(requestHeader, bodyFactories, req.TLS != nil)
 }
 
-func checkPost(clientCmd ClientCmd, writer http.ResponseWriter, req *http.Request) bool {
+func checkPost(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *http.Request) bool {
 	needsPost, exists := postOnlyCmdMap[clientCmd]
 	if exists && needsPost && req.Method != http.MethodPost {
-		output := unSuccessfulResponse("Post Required!")
+		output := policy.UnSuccessfulResponse("Post Required!")
 		writeable, err := output.Digest(output.Data)
 		if err != nil {
 			log.Fatal("handleHttp: Could Not Write Utility Response to User!")
@@ -259,13 +260,13 @@ type TCPRequestPrefix struct {
 
 // TCP Entrypoint
 func startTCPListening(ctx context.Context) {
-	log.Println("TCP Listening on " + listeningTCPIpAddress + listeningTCPPortNumber + "!")
-	ln, err := net.Listen("tcp", listeningTCPIpAddress+":"+listeningTCPPortNumber)
+	log.Println("TCP Listening on " + ListeningTCPIpAddress + ListeningTCPPortNumber + "!")
+	ln, err := net.Listen("tcp", ListeningTCPIpAddress+":"+ListeningTCPPortNumber)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	pool := NewThreadPoolWithContext(numberOfTCPThreads, ctx)
+	pool := util.NewThreadPoolWithContext(NumberOfTCPThreads, ctx)
 
 	for {
 		select {
@@ -291,7 +292,7 @@ func startTCPListening(ctx context.Context) {
 func handleTCPConnection(ctx context.Context, clientConn TCPClientConn) {
 	log.Println("New Connection!")
 	// Set Timeout
-	clientConn.conn.SetReadDeadline(time.Now().Add(ioDeadline))
+	clientConn.conn.SetReadDeadline(time.Now().Add(IoDeadline))
 	defer clientConn.conn.Close()
 	defer log.Println("Connection Closed!")
 
@@ -321,7 +322,7 @@ func handleTCPConnection(ctx context.Context, clientConn TCPClientConn) {
 		keepAlive = readAndRespondTCP(clientConn, &dataIn) && computeTCPKeepAlive(clientConn)
 
 		if keepAlive {
-			clear(&dataIn)
+			util.Clear(&dataIn)
 		}
 	}
 }
@@ -340,7 +341,7 @@ func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool {
 		return false
 	}
 
-	returnWithoutRequest, err := secureTCPConnIfNeeded(&clientConn, prefix)
+	returnWithoutRequest, err := SecureTCPConnIfNeeded(&clientConn, prefix)
 	if err != nil {
 		log.Println(err)
 		return false
@@ -351,7 +352,7 @@ func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool {
 	header, bodyFactory, err := generateRequestFromTCP(n, dataIn, prefix)
 	if err != nil {
 		log.Println(err)
-		err = writeTCPResponse(clientConn, &malformedDataMsg, malformedDataMsgLen)
+		err = writeTCPResponse(clientConn, &MalformedDataMsg, MalformedDataMsgLen)
 		if err != nil {
 			log.Println(err)
 		}
@@ -388,16 +389,16 @@ func parseTCPPrefix(length int, data *[]byte) (TCPRequestPrefix, error) {
 	return prefix, nil
 }
 
-func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (RequestHeader, RequestBodyFactories, error) {
-	header := RequestHeader{}
-	factories := RequestBodyFactories{}
+func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (policy.RequestHeader, policy.RequestBodyFactories, error) {
+	header := policy.RequestHeader{}
+	factories := policy.RequestBodyFactories{}
 
 	if length < 3 {
 		return header, factories, errors.New("No Command In Request")
 	}
 
 	// Get Command
-	cmd, err := parseCommand((*data)[1], (*data)[2])
+	cmd, err := ParseCommand((*data)[1], (*data)[2])
 	if err != nil {
 		return header, factories, err
 	}
@@ -414,12 +415,12 @@ func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (
 	header.UserID = attachment.UserID
 
 	bodyPayload := bodyAttachmentAndPayload[bodyStart:]
-	factories.parseFactory = func(ptr interface{}) error {
+	factories.ParseFactory = func(ptr interface{}) error {
 		return parseBody(ptr, prefix, &bodyPayload)
 	}
 
-	factories.sigVerify = func(userID string, userSig string) error {
-		return sigVerification(userID, userSig, &bodyPayload)
+	factories.SigVerify = func(userID string, userSig string) error {
+		return SigVerification(userID, userSig, &bodyPayload)
 	}
 
 	return header, factories, nil

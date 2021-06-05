@@ -1,4 +1,4 @@
-package main
+package schedule
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 
 	"github.com/mediocregopher/radix/v3"
 	"github.com/robfig/cron/v3"
+	"laplace-entangled-env.com/internal/event"
+	"laplace-entangled-env.com/internal/redis"
 )
 
 type CronEvent struct {
@@ -28,7 +30,7 @@ var masterCron *cron.Cron = nil
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-func startCronScheduler() (func(), error) {
+func StartCronScheduler() (func(), error) {
 	err := initialSchedule()
 	if err != nil {
 		return nil, err
@@ -69,10 +71,10 @@ func initialSchedule() error {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 func eventCheckHealth() {
-	gameIDSlice := make([]string, eventHealthTaskCapacity)
-	gameIDSlicePrefixed := make([]string, eventHealthTaskCapacity)
+	gameIDSlice := make([]string, EventHealthTaskCapacity)
+	gameIDSlicePrefixed := make([]string, EventHealthTaskCapacity)
 
-	err := masterRedis.Do(radix.Cmd(&gameIDSlice, "LPOP", healthTaskQueue, fmt.Sprintf("%d", eventHealthTaskCapacity)))
+	err := redis.MasterRedis.Do(radix.Cmd(&gameIDSlice, "LPOP", event.HealthTaskQueue, fmt.Sprintf("%d", EventHealthTaskCapacity)))
 	if err != nil {
 		log.Fatalln("Trouble Using Health Event: " + err.Error())
 	}
@@ -85,7 +87,7 @@ func eventCheckHealth() {
 
 	for i, s := range gameIDSlice {
 		temp[0] = s
-		gameIDSlicePrefixed[i] = constructTaskWithPrefix(healthTaskPrefix, temp)
+		gameIDSlicePrefixed[i] = constructTaskWithPrefix(HealthTaskPrefix, temp)
 	}
 
 	err = sendTasksToWorkers(gameIDSlicePrefixed)

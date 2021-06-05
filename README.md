@@ -10,4 +10,4 @@ A out of the box backend service for games to create a client-based multiplayer 
 `openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out tlscert.crt -keyout tlskey.key`
 
 ## Running the Project
-`go run src/*.go`
+`go run ./cmd/main.go`

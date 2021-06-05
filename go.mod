@@ -1,4 +1,4 @@
-module example.com/PAWthorne-server
+module laplace-entangled-env.com
 
 go 1.15
 

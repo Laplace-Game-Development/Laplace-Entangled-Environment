@@ -1,12 +1,10 @@
-package main
+package util
 
 import (
 	"context"
 	"errors"
 	"time"
 )
-
-// Todo we may want to make this it's own package
 
 type ThreadPool struct {
 	threadNum       int
