@@ -1,4 +1,4 @@
-package main
+package util
 
 import (
 	"errors"
@@ -7,17 +7,17 @@ import (
 
 type ErrorRunnable func() error
 
-func clear(data *[]byte) {
+func Clear(data *[]byte) {
 	for i := 0; i < len(*data); i++ {
 		(*data)[i] = 0
 	}
 }
 
-func newErrorJson(str string) []byte {
+func NewErrorJson(str string) []byte {
 	return []byte("{\"error\": \"" + str + "\"}")
 }
 
-func strTokWithEscape(seperator *[]byte, escape *[]byte, str *[]byte, start uint) ([]byte, uint) {
+func StrTokWithEscape(seperator *[]byte, escape *[]byte, str *[]byte, start uint) ([]byte, uint) {
 	matchesSepIndex := 0
 	sepLength := len(*seperator)
 	matchesEscIndex := 0
@@ -47,7 +47,7 @@ func strTokWithEscape(seperator *[]byte, escape *[]byte, str *[]byte, start uint
 	return nil, 0
 }
 
-func concat(output *[]byte, input *[]byte, outputStart int) error {
+func Concat(output *[]byte, input *[]byte, outputStart int) error {
 	outputLength := len(*output)
 	inputLength := len(*input)
 
@@ -63,7 +63,7 @@ func concat(output *[]byte, input *[]byte, outputStart int) error {
 	return nil
 }
 
-func errorless(fn ErrorRunnable) {
+func Errorless(fn ErrorRunnable) {
 	err := fn()
 
 	if err != nil {

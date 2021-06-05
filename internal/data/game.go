@@ -1,4 +1,4 @@
-package main
+package data
 
 import (
 	"context"
@@ -6,27 +6,31 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"time"
 
 	"github.com/mediocregopher/radix/v3"
 	"github.com/pebbe/zmq4"
+	"laplace-entangled-env.com/internal/policy"
+	"laplace-entangled-env.com/internal/redis"
+	"laplace-entangled-env.com/internal/zeromq"
 )
 
 // Configurables
-const waitDurationForGameStart time.Duration = 10 * time.Second
-const waitDurationForGameAction time.Duration = 3 * time.Second
-const commandToExec string = "node"
-const gamePortNum string = "5011"
-const gamePort string = ":" + gamePortNum
+const WaitDurationForGameStart time.Duration = 10 * time.Second
+const WaitDurationForGameAction time.Duration = 3 * time.Second
+const CommandToExec string = "node"
+const GamePortNum string = "5011"
+const GamePort string = ":" + GamePortNum
 
-var commandArgs []string = []string{"index.js", "--binding=5011"}
+var CommandArgs []string = []string{"index.js", "--binding=5011"}
 
 // Global Variables | Singletons
 var commandContext context.Context = nil
 var cancelFunc func() = nil
 
-func startGameLogic() (func(), error) {
+func StartGameLogic() (func(), error) {
 	executeCommand()
 	return cleanUpGameLogic, nil
 }
@@ -35,7 +39,7 @@ func cleanUpGameLogic() {
 	log.Println("Cleaning Up Game Logic")
 	cancelFunc()
 
-	deadlineForStop := time.Now().Add(waitDurationForGameStart)
+	deadlineForStop := time.Now().Add(WaitDurationForGameStart)
 	done := false
 	for deadlineForStop.Before(time.Now()) {
 		select {
@@ -54,12 +58,21 @@ func cleanUpGameLogic() {
 func executeCommand() {
 	commandContext, cancelFunc = context.WithCancel(context.Background())
 
-	cmd := exec.CommandContext(commandContext, commandToExec, commandArgs...)
+	pwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Error getting PWD: %v\n", err)
+	}
+
+	log.Printf("Present Working Directory\n%s\n", pwd)
+	log.Printf("Executing Command!\n %s %v\n", CommandToExec, CommandArgs)
+
+	cmd := exec.CommandContext(commandContext, CommandToExec, CommandArgs...)
 
 	// Making sure to nil these for security reasons
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
+	// TODO Add Errorhandling to function via Channel.
 	go func() {
 		err := cmd.Run()
 		if err != nil {
@@ -68,9 +81,9 @@ func executeCommand() {
 	}()
 }
 
-func bytesToGame(dataIn string) (string, error) {
+func BytesToGame(dataIn string) (string, error) {
 	// Create a Zeromq Request Port
-	req, err := masterZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
+	req, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
 	if err != nil {
 		return "", err
 	}
@@ -78,7 +91,7 @@ func bytesToGame(dataIn string) (string, error) {
 	// Not necessary, but good practice
 	defer req.Close()
 
-	err = req.Connect(zeromqHost + gamePort)
+	err = req.Connect(zeromq.ZeromqHost + GamePort)
 	if err != nil {
 		return "", err
 	}
@@ -90,14 +103,14 @@ func bytesToGame(dataIn string) (string, error) {
 		return "", errors.New("ZeroMQ did not Accept Full Job! Characters Accepted:" + fmt.Sprintf("%d", num))
 	}
 
-	return bytesFromGame(req)
+	return BytesFromGame(req)
 }
 
-func bytesFromGame(req *zmq4.Socket) (string, error) {
+func BytesFromGame(req *zmq4.Socket) (string, error) {
 	poller := zmq4.NewPoller()
 
 	poller.Add(req, zmq4.POLLIN)
-	sockets, err := poller.Poll(waitDurationForGameAction)
+	sockets, err := poller.Poll(WaitDurationForGameAction)
 	if err != nil {
 		log.Println("It seems Response Wait Was Interrupted")
 		return "", err
@@ -129,36 +142,36 @@ type actionServerPayload struct {
 	Relay map[string]interface{}
 }
 
-func applyAction(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+func ApplyAction(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	// 1. Verify Request
-	err := bodyFactories.sigVerify(header.UserID, header.Sig)
+	err := bodyFactories.SigVerify(header.UserID, header.Sig)
 	if err != nil {
 		log.Printf("Unauthorized Attempt! Error: %v\n", err)
-		return unSuccessfulResponse("Unauthorized!")
+		return policy.UnSuccessfulResponse("Unauthorized!")
 	}
 
 	// 2. Get Request Data
 	args := applyActionRequest{}
-	err = bodyFactories.parseFactory(&args)
+	err = bodyFactories.ParseFactory(&args)
 	if err != nil {
 		log.Printf("Bad Argument! Error: %v\n", err)
-		return unSuccessfulResponse("Bad Arguments!")
+		return policy.UnSuccessfulResponse("Bad Arguments!")
 	}
 
 	// 3. Verify User is In Game
-	isInGame, err := isUserInGame(header.UserID, args.GameID)
+	isInGame, err := IsUserInGame(header.UserID, args.GameID)
 	if err != nil {
 		log.Printf("Error Verifying User is in game: %v\n", err)
-		return unSuccessfulResponse("User Not In Game")
+		return policy.UnSuccessfulResponse("User Not In Game")
 	} else if !isInGame {
-		return unSuccessfulResponse("User Not In Game")
+		return policy.UnSuccessfulResponse("User Not In Game")
 	}
 
 	// 4. Load Game State Data
 	var state string
-	err = masterRedis.Do(radix.Cmd(&state, "HGET", gameHashSetName, args.GameID))
+	err = redis.MasterRedis.Do(radix.Cmd(&state, "HGET", GameHashSetName, args.GameID))
 	if err != nil || len(state) <= 0 {
-		return respWithError(err)
+		return policy.RespWithError(err)
 	}
 
 	// 5. Send to Server Application
@@ -169,47 +182,47 @@ func applyAction(header RequestHeader, bodyFactories RequestBodyFactories, isSec
 	// This needs to be done for typesafety... Might be better to do custom marshalling for this
 	err = json.Unmarshal([]byte(state), &payload.State)
 	if err != nil {
-		return respWithError(err)
+		return policy.RespWithError(err)
 	}
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return respWithError(err)
+		return policy.RespWithError(err)
 	}
 
-	response, err := bytesToGame(string(payloadBytes))
+	response, err := BytesToGame(string(payloadBytes))
 
 	// Response should already be in JSON format... Let's not marshall again pls.
-	return rawSuccessfulResponse(response)
+	return policy.RawSuccessfulResponse(response)
 }
 
 type getGameDataRequest struct {
 	GameID string
 }
 
-func getGameData(header RequestHeader, bodyFactories RequestBodyFactories, isSecureConnection bool) CommandResponse {
+func GetGameData(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	// 1. Get Game Info From Request
-	err := bodyFactories.sigVerify(header.UserID, header.Sig)
+	err := bodyFactories.SigVerify(header.UserID, header.Sig)
 	if err != nil {
 		log.Printf("Unauthorized Attempt! Error: %v\n", err)
-		return unSuccessfulResponse("Unauthorized!")
+		return policy.UnSuccessfulResponse("Unauthorized!")
 	}
 
 	// 2. Get Request Data
 	args := getGameDataRequest{}
-	err = bodyFactories.parseFactory(&args)
+	err = bodyFactories.ParseFactory(&args)
 	if err != nil {
 		log.Printf("Bad Argument! Error: %v\n", err)
-		return unSuccessfulResponse("Bad Arguments!")
+		return policy.UnSuccessfulResponse("Bad Arguments!")
 	}
 
 	// 3. Load Game State Data
 	var state string
-	err = masterRedis.Do(radix.Cmd(&state, "HGET", gameHashSetName, args.GameID))
+	err = redis.MasterRedis.Do(radix.Cmd(&state, "HGET", GameHashSetName, args.GameID))
 	if err != nil {
-		return respWithError(err)
+		return policy.RespWithError(err)
 	} else if len(state) <= 0 {
-		return unSuccessfulResponse("Game Does Not Exist")
+		return policy.UnSuccessfulResponse("Game Does Not Exist")
 	}
 
 	// 4. Send to Server Application
@@ -220,16 +233,16 @@ func getGameData(header RequestHeader, bodyFactories RequestBodyFactories, isSec
 	// This needs to be done for typesafety... Might be better to do custom marshalling for this
 	err = json.Unmarshal([]byte(state), &payload.State)
 	if err != nil {
-		return respWithError(err)
+		return policy.RespWithError(err)
 	}
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return respWithError(err)
+		return policy.RespWithError(err)
 	}
 
-	response, err := bytesToGame(string(payloadBytes))
+	response, err := BytesToGame(string(payloadBytes))
 
 	// Response should already be in JSON format... Let's not marshall again pls.
-	return rawSuccessfulResponse(response)
+	return policy.RawSuccessfulResponse(response)
 }

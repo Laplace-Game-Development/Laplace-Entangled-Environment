@@ -1,4 +1,4 @@
-package main
+package schedule
 
 import (
 	"errors"
@@ -8,47 +8,37 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mediocregopher/radix/v3"
 	"github.com/pebbe/zmq4"
+	"laplace-entangled-env.com/internal/data"
+	"laplace-entangled-env.com/internal/event"
+	"laplace-entangled-env.com/internal/policy"
+	"laplace-entangled-env.com/internal/route"
+	"laplace-entangled-env.com/internal/zeromq"
 )
 
 // ZeroMQ/Task Server Settings
-const numberOfTaskWorkers uint8 = 5
-const zeromqMask string = "tcp://*"
-const zeromqHost string = "tcp://127.0.0.1"
-const proxyPubPort string = ":5565"
-const proxySubPort string = ":5566"
-const proxyControlPort string = ":5567"
-
-// Table / Datastructure Names
-const healthTaskQueue string = "healthTaskQueue"
+const NumberOfTaskWorkers uint8 = 5
+const ProxyPubPort string = ":5565"
+const ProxySubPort string = ":5566"
+const ProxyControlPort string = ":5567"
 
 // Configurables
-const emptyQueueSleepDuration time.Duration = time.Duration(time.Minute)
-const eventHealthTaskCapacity uint8 = 50
-const magicRune rune = '~'
-const staleGameDuration time.Duration = time.Duration(time.Minute * 5)
+const EmptyQueueSleepDuration time.Duration = time.Duration(time.Minute)
+const EventHealthTaskCapacity uint8 = 50
+const MagicRune rune = '~'
 
 // Task Prefixes
-const healthTaskPrefix string = "healthTask"
+const HealthTaskPrefix string = "healthTask"
 
 // Global Variables | Singletons
-var masterZeroMQ *zmq4.Context = nil
 var zeroMQProxyControl *zmq4.Socket = nil
 var zeroMQWorkerChannelIn chan bool = nil
 var zeroMQWorkerChannelOut chan bool = nil
 
-func startTaskQueue() (func(), error) {
+func StartTaskQueue() (func(), error) {
 	// FOR CI:
 	// TODO, it may be easier to bind these to ports assigned by the database
 	// TODO, alternatively we could use smart configuration generators
-
-	ctx, err := zmq4.NewContext()
-	if err != nil {
-		return nil, err
-	}
-
-	masterZeroMQ = ctx
 
 	// Start Asynchronous proxy (costs 1 thread)
 	proxyResponse := make(chan bool)
@@ -62,12 +52,12 @@ func startTaskQueue() (func(), error) {
 	}
 
 	// Set a Control
-	zeroMQProxyControl, err := ctx.NewSocket(zmq4.Type(zmq4.PUB))
+	zeroMQProxyControl, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.PUB))
 	if err != nil {
 		return nil, err
 	}
 
-	err = zeroMQProxyControl.Bind(zeromqMask + proxyControlPort)
+	err = zeroMQProxyControl.Bind(zeromq.ZeromqMask + ProxyControlPort)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +67,7 @@ func startTaskQueue() (func(), error) {
 	zeroMQWorkerChannelOut = make(chan bool)
 
 	// Start a few workers
-	for i := uint8(0); i < numberOfTaskWorkers; i++ {
+	for i := uint8(0); i < NumberOfTaskWorkers; i++ {
 		go startTaskWorker(i, zeroMQWorkerChannelIn, zeroMQWorkerChannelOut)
 	}
 
@@ -92,17 +82,15 @@ func startTaskQueue() (func(), error) {
 
 // Start on seperate thread due to zmq_proxy
 func startAsynchronousProxy(resp chan bool) {
-	ctx := masterZeroMQ
-
 	// Worker-Facing Publisher
-	zmqXPUB, err := ctx.NewSocket(zmq4.Type(zmq4.XPUB))
+	zmqXPUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.XPUB))
 	if err != nil {
 		log.Println(err)
 		resp <- false
 		return
 	}
 
-	err = zmqXPUB.Bind(zeromqMask + proxyPubPort)
+	err = zmqXPUB.Bind(zeromq.ZeromqMask + ProxyPubPort)
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -110,14 +98,14 @@ func startAsynchronousProxy(resp chan bool) {
 	}
 
 	// Callsite socket
-	zmqXSUB, err := ctx.NewSocket(zmq4.Type(zmq4.XSUB))
+	zmqXSUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.XSUB))
 	if err != nil {
 		log.Println(err)
 		resp <- false
 		return
 	}
 
-	err = zmqXSUB.Bind(zeromqMask + proxySubPort)
+	err = zmqXSUB.Bind(zeromq.ZeromqMask + ProxySubPort)
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -125,14 +113,14 @@ func startAsynchronousProxy(resp chan bool) {
 	}
 
 	// Interrupt socket
-	zmqCON, err := ctx.NewSocket(zmq4.Type(zmq4.SUB))
+	zmqCON, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.SUB))
 	if err != nil {
 		log.Println(err)
 		resp <- false
 		return
 	}
 
-	err = zmqCON.Connect(zeromqHost + proxyControlPort)
+	err = zmqCON.Connect(zeromq.ZeromqHost + ProxyControlPort)
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -165,7 +153,7 @@ func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan boo
 		return
 	}
 
-	err = subSocket.Connect(zeromqHost + proxyPubPort)
+	err = subSocket.Connect(zeromq.ZeromqHost + ProxyPubPort)
 	if err != nil {
 		log.Printf("Could Not Start Task Worker! ID: %d\n", id)
 		log.Println(err)
@@ -184,7 +172,7 @@ func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan boo
 		msg, err := subSocket.Recv(zmq4.Flag(zmq4.DONTWAIT))
 		if err != nil && zmq4.AsErrno(err) == zmq4.Errno(syscall.EAGAIN) {
 			log.Printf("Nothing to Consume! ID: %d\n", id)
-			time.Sleep(emptyQueueSleepDuration)
+			time.Sleep(EmptyQueueSleepDuration)
 		} else if err != nil {
 			log.Printf("Error Upon Consuming! ID: %d\n", id)
 			log.Println(err)
@@ -208,12 +196,12 @@ func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan boo
 func cleanUpTaskQueue() {
 	log.Println("Signalling Task Workers for CleanUp")
 
-	for i := uint8(0); i < numberOfTaskWorkers; i++ {
+	for i := uint8(0); i < NumberOfTaskWorkers; i++ {
 		zeroMQWorkerChannelIn <- true
 	}
 
 	log.Println("Signalling Finished Waiting for response!")
-	for i := uint8(0); i < numberOfTaskWorkers; i++ {
+	for i := uint8(0); i < NumberOfTaskWorkers; i++ {
 		<-zeroMQWorkerChannelOut
 	}
 
@@ -222,12 +210,12 @@ func cleanUpTaskQueue() {
 
 func sendTasksToWorkers(msgs []string) error {
 	// Proxy Facing Publisher
-	zmqPUB, err := masterZeroMQ.NewSocket(zmq4.Type(zmq4.PUB))
+	zmqPUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.PUB))
 	if err != nil {
 		return err
 	}
 
-	err = zmqPUB.Connect(zeromqHost + proxySubPort)
+	err = zmqPUB.Connect(zeromq.ZeromqHost + ProxySubPort)
 	if err != nil {
 		return err
 	}
@@ -252,27 +240,12 @@ func sendTasksToWorkers(msgs []string) error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
-//// Tasks Submissions -- Public Interface Functions
-////
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-func submitGameForHealthCheck(gameID string) error {
-	err := masterRedis.Do(radix.Cmd(nil, "RPUSH", healthTaskQueue, gameID))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-////
 //// Tasks Working -- Parsed Worker Functions
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 var mapPrefixToWork map[string]func([]string) error = map[string]func([]string) error{
-	healthTaskPrefix: healthTaskWork,
+	HealthTaskPrefix: healthTaskWork,
 }
 
 func onTask(msg string) error {
@@ -298,24 +271,24 @@ func healthTaskWork(args []string) error {
 		return errors.New("Task Did Not Receive Game ID!")
 	}
 
-	gameTime, err := getRoomHealth(args[0])
+	gameTime, err := data.GetRoomHealth(args[0])
 	if err != nil {
 		return err
 	}
 
-	if gameTime.Add(staleGameDuration).Before(time.Now().UTC()) {
-		superUserRequest, err := requestWithSuperUser(true, cmdGameDelete, SelectGameArgs{args[0]})
+	if gameTime.Add(policy.StaleGameDuration).Before(time.Now().UTC()) {
+		superUserRequest, err := route.RequestWithSuperUser(true, policy.CmdGameDelete, data.SelectGameArgs{GameID: args[0]})
 		if err != nil {
 			return err
 		}
 
-		resp := deleteGame(superUserRequest.Header, superUserRequest.BodyFactories, superUserRequest.IsSecureConnection)
+		resp := data.DeleteGame(superUserRequest.Header, superUserRequest.BodyFactories, superUserRequest.IsSecureConnection)
 		if resp.ServerError != nil {
 			return resp.ServerError
 		}
 
 	} else {
-		submitGameForHealthCheck(args[0])
+		event.SubmitGameForHealthCheck(args[0])
 	}
 
 	return nil
@@ -323,7 +296,7 @@ func healthTaskWork(args []string) error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
-//// Tasks Utility Functions -- Funcitons that help behind the scenes
+//// Tasks Utility Functions -- Functions that help behind the scenes
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -333,7 +306,7 @@ func constructTaskWithPrefix(prefix string, args []string) string {
 	builder.WriteString(prefix)
 
 	for _, s := range args {
-		builder.WriteRune(magicRune)
+		builder.WriteRune(MagicRune)
 		builder.WriteString(s)
 	}
 
@@ -341,6 +314,6 @@ func constructTaskWithPrefix(prefix string, args []string) string {
 }
 
 func parseTask(msg string) (string, []string) {
-	slice := strings.Split(msg, string(magicRune))
+	slice := strings.Split(msg, string(MagicRune))
 	return slice[0], slice[1:]
 }
