@@ -18,4 +18,7 @@ The application will support running of different binaries to communicate with. 
 `openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out tlscert.crt -keyout tlskey.key`
 
 ## Running the Project
-`go run ./cmd/main.go`
+`go run ./cmd/main.go` will run the application
+
+## Testing the Project
+`go test ./...` will run all tests associated with the application
