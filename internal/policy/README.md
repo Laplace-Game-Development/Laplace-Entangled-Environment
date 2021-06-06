@@ -1,0 +1,2 @@
+# policy
+Policy represents the common interfaces used in requesting and responding to users. These formats are parsed and sent to the data driven modules to perform work. The data driven commands then reply with these interfaces so the listeners can send a response.

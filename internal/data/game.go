@@ -24,7 +24,7 @@ const CommandToExec string = "node"
 const GamePortNum string = "5011"
 const GamePort string = ":" + GamePortNum
 
-var CommandArgs []string = []string{"index.js", "--binding=5011"}
+var CommandArgs []string = []string{"./node-layer/index.js", "--binding=5011"}
 
 // Global Variables | Singletons
 var commandContext context.Context = nil
@@ -191,6 +191,17 @@ func ApplyAction(header policy.RequestHeader, bodyFactories policy.RequestBodyFa
 	}
 
 	response, err := BytesToGame(string(payloadBytes))
+	if err != nil {
+		log.Printf("A Server Error Occurred: %v\n", err)
+		return policy.RawUnsuccessfulResponse("Could Not Upload State to Server!")
+	}
+
+	// 6. On Success update metadata
+	milli := fmt.Sprintf("%d", time.Now().UTC().Unix())
+	err = redis.MasterRedis.Do(radix.Cmd(nil, "HSET", MetadataSetPrefix+args.GameID, MetadataSetLastUsed, milli))
+	if err != nil {
+		log.Printf("A Server Error Occurred: %v\n", err)
+	}
 
 	// Response should already be in JSON format... Let's not marshall again pls.
 	return policy.RawSuccessfulResponse(response)
