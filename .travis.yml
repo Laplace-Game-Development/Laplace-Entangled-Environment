@@ -1,7 +1,8 @@
 language: go
+go: "1.15"
 os: linux
 arch: amd64
-dist: trusty
+dist: bionic
 sudo: required
 git:
   strategy: clone
@@ -15,7 +16,6 @@ before_install:
 - nvm install node
 - gimme stable
 - sudo apt-get -y install libzmq3-dev
-- sudo apt-get -y install build-essential
 
 
 install:
