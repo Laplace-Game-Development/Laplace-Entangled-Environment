@@ -1,0 +1,17 @@
+language: go
+os: linux
+arch: amd64
+dist: precise
+git:
+  strategy: clone
+  depth: 1
+  quiet: true
+
+install:
+- cd node-layer
+- npm install
+- cd ..
+- openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out tlscert.crt -keyout tlskey.key
+
+script:
+- go test ./...
