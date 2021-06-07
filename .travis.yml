@@ -14,7 +14,6 @@ services:
 
 before_install:
 - nvm install node
-- gimme stable
 - sudo apt-get -y install libzmq3-dev
 
 
@@ -23,7 +22,7 @@ install:
 - cd node-layer
 - npm install
 - cd ..
-- openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out tlscert.crt -keyout tlskey.key
+- openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out tlscert.crt -keyout tlskey.key -subj "/C=US/ST=California/L=Los Angeles/O=Laplace Game Development/CN=www.example.com"
 
 script:
 - go test ./...
