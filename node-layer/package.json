@@ -19,6 +19,6 @@
   "license": "LGPLv3",
   "dependencies": {
     "yargs": "^16.2.0",
-    "zeromq": "^5.2.0"
+    "zeromq": "^5.2.8"
   }
 }

@@ -1,0 +1,2 @@
+# route
+Route Represents the routing and listening to connections. This module takes care of the communication links to users and clients. They will forward commands to data driven modules in `/data`. The Listener module makes sure to listen to connections over TCP and HTTP (maybe Websocket too later.) We also have the parser which uses the policy directives to break apart the user payloads into understandable commands. Secure takes care of any encryption necessary over the wire.

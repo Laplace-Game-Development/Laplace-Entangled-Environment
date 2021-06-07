@@ -1,0 +1,2 @@
+# schedule
+The schedule module represents the legwork implementation done behind the scenes for events. This communicates to worker threads over tcp using zeromq to split work evenly and rapidly. This in a way represents a self-made attempt at a Messaging Queue (currently without priority or logging).

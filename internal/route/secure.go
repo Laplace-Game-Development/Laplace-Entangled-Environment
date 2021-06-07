@@ -203,7 +203,7 @@ func CreateAccount(username string, password string) (bool, error) {
 	}
 
 	// TODO We can add other fields here
-	err = redis.MasterRedis.Do(radix.Cmd(nil, "HMSET", fmt.Sprintf(AuthIDSetPrefix+"%d", newID),
+	err = redis.MasterRedis.Do(radix.Cmd(nil, "HSET", fmt.Sprintf(AuthIDSetPrefix+"%d", newID),
 		AuthIDSetUsernameField, castedName,
 		AuthIDSetTokenField, "",
 		AuthIDSetTokenStaleDateTimeField, fmt.Sprintf("0"),
@@ -289,7 +289,7 @@ func ConstructNewToken(authID string) ([]byte, time.Time, error) {
 		return nil, staleDateTime, errors.New("rand.Read did not return full Token!")
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(nil, "HMSET", authIDSet,
+	err = redis.MasterRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
 		AuthIDSetTokenField, string(token),
 		AuthIDSetTokenStaleDateTimeField, fmt.Sprintf("%d", staleDateTime.Unix()),
 		AuthIDSetTokenUseCounter, "0"))

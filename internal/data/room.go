@@ -3,7 +3,9 @@ package data
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/mediocregopher/radix/v3"
@@ -15,11 +17,16 @@ import (
 // Table / Datastructure Names
 const GameListName string = "gameList"
 const GameHashSetName string = "gameHash"
-const MetadataHashSetName string = "metadataHash"
 const OwnerHashSetName string = "ownerMapGame"
 const PlayerSetPrefix string = "roster:"
 const GameAtomicCounter string = "gameCountInteger"
 const EmptyName string = "empty"
+
+// Metadata Table
+const MetadataSetPrefix string = "metadataHash:"
+const MetadataSetOwner string = "owner"
+const MetadataSetCreatedAt string = "createdAt"
+const MetadataSetLastUsed string = "lastUsed"
 
 // Other Constants
 const NumberOfGames = 20
@@ -94,7 +101,6 @@ func CreateGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 
 	gameID := StringIDFromNumbers(atomicClockValue)
 	metadata := GameMetadata{Id: gameID, Owner: header.UserID, CreatedAt: time.Now().UTC().Unix(), LastUsed: time.Now().UTC().Unix()}
-	serializedMetadata := SerializeMetadata(metadata)
 
 	// TODO Add Pipelining
 	err = redis.MasterRedis.Do(radix.Cmd(&success, "HSETNX", GameHashSetName, gameID, "{}"))
@@ -102,7 +108,7 @@ func CreateGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 		return policy.RespWithError(err)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "HSETNX", MetadataHashSetName, gameID, serializedMetadata))
+	err = SetGameMetadata(metadata)
 	if err != nil || success == 0 {
 		return policy.RespWithError(err)
 	}
@@ -256,46 +262,36 @@ func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 		return policy.RespWithError(err)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "HDEL", MetadataHashSetName, args.GameID))
+	err = redis.MasterRedis.Do(radix.Cmd(&success, "DEL", MetadataSetPrefix, args.GameID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if !success {
-		log.Println("Failed to Delete Metadata at: " + MetadataHashSetName + " <> " + args.GameID)
-	}
-
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "HDEL", MetadataHashSetName, args.GameID))
-	if err != nil {
-		return policy.RespWithError(err)
-	} else if !success {
-		log.Println("Failed to Delete Metadata at: " + MetadataHashSetName + " <> " + args.GameID)
+		log.Println("Failed to Delete Metadata at:  " + MetadataSetPrefix + args.GameID)
 	}
 
 	err = redis.MasterRedis.Do(radix.Cmd(&success, "SUNIONSTORE", PlayerSetPrefix+args.GameID, EmptyName))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if !success {
-		log.Println("Failed to Remove Players at: " + PlayerSetPrefix + args.GameID)
+		log.Println("Failed to Remove Players at:  " + PlayerSetPrefix + args.GameID)
 	}
 
 	return policy.SuccessfulResponse()
 }
 
 func GetRoomHealth(gameID string) (time.Time, error) {
-	var marshalledMetadata string
+	var lastUpdate string
 
-	err := redis.MasterRedis.Do(radix.Cmd(&marshalledMetadata, "HGET", MetadataHashSetName, gameID))
+	err := redis.MasterRedis.Do(radix.Cmd(&lastUpdate, "HGET", MetadataSetPrefix+gameID, MetadataSetLastUsed))
 	if err != nil {
 		return time.Now().UTC(), err
-	} else if len(marshalledMetadata) <= 0 {
+	} else if len(lastUpdate) <= 0 {
 		return time.Now().UTC(), errors.New("Game Metadata does not seem to exists. GameID: " + gameID)
 	}
 
-	metadata, err := UnserializeMetadata(marshalledMetadata)
-	if err != nil {
-		return time.Now().UTC(), err
-	}
+	milli, err := strconv.ParseInt(lastUpdate, 10, 64)
 
-	return time.Unix(metadata.LastUsed, 0), nil
+	return time.Unix(milli, 0), nil
 }
 
 func IsUserInGame(userID string, gameID string) (bool, error) {
@@ -334,25 +330,38 @@ func StringIDFromNumbers(counter int64) string {
 	return string(res)
 }
 
-func SerializeMetadata(metadata GameMetadata) string {
-	// We could do our own serialization here, but JSON is fine for now.
-	bytes, err := json.Marshal(metadata)
-	if err != nil {
-		log.Println("Unable to serialize data!")
-		return ""
-	}
-
-	return string(bytes)
+func SetGameMetadata(metadata GameMetadata) error {
+	return redis.MasterRedis.Do(radix.Cmd(nil, "HSET", MetadataSetPrefix+metadata.Id,
+		MetadataSetOwner, metadata.Owner,
+		MetadataSetCreatedAt, fmt.Sprintf("%d", metadata.CreatedAt),
+		MetadataSetLastUsed, fmt.Sprintf("%d", metadata.LastUsed)))
 }
 
-func UnserializeMetadata(bytes string) (GameMetadata, error) {
-	// We could do our own deserialization here, but JSON is fine for now.
-	var result GameMetadata
+func GetGameMetadata(gameID string) (GameMetadata, error) {
+	fields := make([]string, 3)
 
-	err := json.Unmarshal([]byte(bytes), &result)
+	err := redis.MasterRedis.Do(radix.Cmd(&fields, "HMGET", MetadataSetPrefix+gameID,
+		MetadataSetOwner,
+		MetadataSetCreatedAt,
+		MetadataSetLastUsed))
+
+	data := GameMetadata{}
+
 	if err != nil {
-		return GameMetadata{}, err
+		return data, err
 	}
 
-	return result, nil
+	data.Id = gameID
+	data.Owner = fields[0]
+	data.CreatedAt, err = strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return data, err
+	}
+
+	data.LastUsed, err = strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return data, err
+	}
+
+	return data, nil
 }

@@ -1,0 +1,2 @@
+# util
+Util (or Utility) module represents the functions used across other modules. These have little to no dependencies and can be used across environments. `pool.go` for example is my implementation of a thread pool using go routines and contexts.
