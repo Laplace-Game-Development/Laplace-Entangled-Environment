@@ -15,7 +15,7 @@ before_install:
 - nvm install node
 - gimme stable
 - sudo apt-get -y install libzmq3-dev
-- sudo apt-get -y install build-essentials
+- sudo apt-get -y install build-essential
 
 
 install:
