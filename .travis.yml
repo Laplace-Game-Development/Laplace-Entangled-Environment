@@ -13,7 +13,6 @@ services:
 before_install:
 - nvm install node
 - gimme stable
-- sudo apt-get update
 - sudo apt-get -y install libzmq3-dev
 
 
