@@ -1,0 +1,30 @@
+package redis // import "laplace-entangled-env.com/internal/redis"
+
+
+CONSTANTS
+
+const RedisIpAddress string = "127.0.0.1"
+    Redis IP Connecting Address
+
+const RedisKeyMax int = 512000000
+    The Maximum Length of a String Key Redis can receive
+
+const RedisPortNumber string = ":6379"
+    Redis Connection Port Number
+
+
+VARIABLES
+
+var MasterRedis radix.Client = nil
+    Global Reference for Redis -- Threadsafe
+
+
+FUNCTIONS
+
+func StartDatabase() (func(), error)
+    ServerTask Startup Function for Redis Database. Takes care of
+    initialization.
+
+func cleanUpDatabase()
+    CleanUp Function returned by Startup function. Closes the Redis Client
+

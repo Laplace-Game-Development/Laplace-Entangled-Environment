@@ -1,0 +1,162 @@
+package schedule // import "laplace-entangled-env.com/internal/schedule"
+
+The schedule package takes care of any "scheduled tasks". Using a
+combination of Cron and ZeroMQ, the schedule package distributes the
+consumption of tasks to multiple workers in order to speed up work as much
+as possible.
+
+CONSTANTS
+
+const EmptyQueueSleepDuration time.Duration = time.Duration(time.Minute)
+    Time that a Worker should sleep/wait in the event of no tasks being ready
+
+const EventHealthTaskCapacity uint8 = 50
+    Number of Event Health Tasks to pop off of redis Maybe this should be in
+    schedule.go
+
+const HealthTaskPrefix string = "healthTask"
+    Game Health Checking to garbage collect game data
+
+const MagicRune rune = '~'
+    Labeled MagicRune as a joke for Golangs named type Used as seperator for
+    communicating work to workers Task Name/Prefix + MagicRune + Params/Data
+
+const NumberOfTaskWorkers uint8 = 5
+    Number of Workers to Distribute to with ZeroMQ
+
+const ProxyControlPort string = ":5567"
+    Proxy Control Port for Interrupting Proxy
+
+const ProxyPubPort string = ":5565"
+    Proxy Publish Port for sending to (application)
+
+const ProxySubPort string = ":5566"
+    Proxy Sub Port for receiving From (workers)
+
+
+VARIABLES
+
+var initialCronLedger []CronEvent = []CronEvent{
+	{"5 * * * * *", eventCheckHealth},
+}
+    Ledger of Cron Events This shouldn't be changed by the code. Used when
+    initially scheduling functions to be run.
+
+var mapPrefixToWork map[string]func([]string) error = map[string]func([]string) error{
+	HealthTaskPrefix: healthTaskWork,
+}
+    Map of Strings to their specific events. The Functions are "work" functions
+    which load the required data to call a function in the event module. These
+    are called and used by workers.
+
+var masterCron *cron.Cron = nil
+    Cron scheduling reference. This should only be used by this module. if you
+    want to dynamically schedule (for whatever reason) use this
+
+var zeroMQProxyControl *zmq4.Socket = nil
+    Control Referency For Proxy Control Port
+
+var zeroMQWorkerChannelIn chan bool = nil
+    Control Communication for Workers Input Used For Cleanup
+
+var zeroMQWorkerChannelOut chan bool = nil
+    Control Communication for Workers Output Used For Cleanup
+
+
+FUNCTIONS
+
+func StartCronScheduler() (func(), error)
+    ServerTask Startup Function for Cron Scheduling. Takes care of
+    initialization.
+
+func StartTaskQueue() (func(), error)
+    ServerTask Startup Function for Schedule Task System. Creates Workers and
+    communication channels with ZeroMQ.
+
+func cleanUpCronScheduler()
+    CleanUp Function returned by Startup function. Stops all Cron scheduling and
+    reports errors that occur when doing so.
+
+func cleanUpTaskQueue()
+    CleanUp Function returned by Startup function. Signals Workers to Finish and
+    blocks until completion.
+
+func constructTaskWithPrefix(prefix string, args []string) string
+    Constructs a string by joining the prefix and args with magic runes i.e.
+    result = prefix + MagicRune + arg0 + MagicRune + arg1 + [MagicRune + argN]
+    ...
+
+func eventCheckHealth()
+    Function added through the "initialCronLedger." Pops entries off of a list
+    representing possibly old and unused games that need their data cleaned up.
+    Send the data to Workers. See healthTaskWork to see how this data is used.
+
+func healthTaskWork(args []string) error
+    Performs the loading required for game garbage collection. It then calls the
+    Game Health Check Event with the proper args.
+
+    args :: the data from the msg. This should be a
+
+func initialSchedule() error
+    Schedule Initialization called from StartCronScheduler. Goes through the
+    "initialCronLedger" and adds each entry to the Cron scheduling reference. It
+    also intitializes the Cron scheduling instance.
+
+func onTask(msg string) error
+    Parses the given message and runs the associated function based on
+    "mapPrefixToWork" Parsing errors are returned as an error.
+
+    msg :: string message for working (Task Name/Prefix+MagicRune+Data)
+
+func parseTask(msg string) (string, []string)
+    Parses a Task based on a MagicRune delimited string. Returns the Prefix and
+    the slice of MagicRune Delimited args.
+
+func sendTasksToWorkers(msgs []string) error
+    Function used by schedule.go to communicate the scheduled tasks to the
+    workers. This takes an array of Task Name/Prefixes+MagicRune+Data strings
+    and sends them to the proxy (which in turn send them to the workers.).
+
+    msg :: slice of string messages to send to workers (Task
+    Name/Prefix+MagicRune+Data)
+
+    Returns an Error if communicating fails (server-shutoff or the full message
+    could not be sent).
+
+func startAsynchronousProxy(resp chan bool)
+    Starts the Proxy Communication Layer. The Application communicates to this
+    block the tasks and data that need to be worked on. The Proxy then
+    distributes the data using ZeroMQ's distribution algorithms.
+
+    resp :: boolean channel which is used to return success/failure
+
+        (since the worker loops forever)
+
+    Should be called in a goroutine otherwise zmq_proxy will block the main
+    "thread"
+
+func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan bool)
+    Starts a worker with the given ID. The worker receives and consumes work
+    from the proxy. It then performs the required event if it recongizes the
+    Task Name/Prefix.
+
+    Any errors in parsing or working the task is logged.
+
+    id :: numerical id for logging signalChannel :: channel for control signal
+    for cleanup responseChannel :: an output channel when a signal is received
+    for cleanup
+
+    The function is contructed to loop forever until signaled otherwise. This
+    function should be run with a goroutine.
+
+
+TYPES
+
+type CronEvent struct {
+	Schedule string
+	Event    func()
+}
+    A Cron Event represents a function that should be run at a certain schedule.
+    This structure should be used when scheduling events at the onset of the
+    application
+

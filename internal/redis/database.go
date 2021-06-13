@@ -6,15 +6,23 @@ import (
 	"github.com/mediocregopher/radix/v3"
 )
 
-// Redis/DB Settings
+//// Redis/DB Settings
+
+// Redis IP Connecting Address
 const RedisIpAddress string = "127.0.0.1"
+
+// Redis Connection Port Number
 const RedisPortNumber string = ":6379"
 
+// The Maximum Length of a String Key Redis can receive
 const RedisKeyMax int = 512000000
 
-// Global Variables | Singletons
+//// Global Variables | Singletons
+
+// Global Reference for Redis -- Threadsafe
 var MasterRedis radix.Client = nil
 
+// ServerTask Startup Function for Redis Database. Takes care of initialization.
 func StartDatabase() (func(), error) {
 
 	// Ah yes! A Thread safe pool implementation. PERRRRFECT
@@ -33,6 +41,7 @@ func StartDatabase() (func(), error) {
 	return cleanUpDatabase, nil
 }
 
+// CleanUp Function returned by Startup function. Closes the Redis Client
 func cleanUpDatabase() {
 	log.Println("Cleaning Up Database Logic")
 	MasterRedis.Close()

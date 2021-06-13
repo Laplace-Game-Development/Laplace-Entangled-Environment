@@ -1,3 +1,4 @@
+// The ZeroMQ module is the holder and initializer for the third-party ZeroMQ Library.
 package zeromq
 
 import (
@@ -6,13 +7,20 @@ import (
 	"github.com/pebbe/zmq4"
 )
 
-// Configurables
+//// Configurables
+
+// ZeroMQ URI Host Binding Mask
 const ZeromqMask string = "tcp://*"
+
+// ZeroMQ URI Client Connection IPs
 const ZeromqHost string = "tcp://127.0.0.1"
 
-// Global Variables | Singletons
+//// Global Variables | Singletons
+
+// ZeroMQ Context Reference -- Defined on Startup
 var MasterZeroMQ *zmq4.Context = nil
 
+// ZeroMQ Server Task. Starts ZeroMQ and Defines Context
 func StartZeroMqComms() (func(), error) {
 	ctx, err := zmq4.NewContext()
 	if err != nil {
@@ -24,6 +32,7 @@ func StartZeroMqComms() (func(), error) {
 	return cleanUpZeroMq, nil
 }
 
+// ZeroMQ Cleanup. Terminates ZeroMQ Context
 func cleanUpZeroMq() {
 	log.Println("Terminating ZeroMQ!")
 

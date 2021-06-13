@@ -20,34 +20,67 @@ import (
 	"laplace-entangled-env.com/internal/util"
 )
 
+//// Configurables
+
 // Redis DB Configurables
+
+// Redis Key for the User Password HashMap
 const UserPassTable string = "userPassword"
+
+// Redis Key for the Atomic UserID Counter
 const AuthIDAtomicCounter string = "authIDAtomicCounter"
+
+// Redis Key for the Username to UserID HashMap
 const UserAuthIDTable string = "userToAuthID"
 
 // User Table
+
+// Redis HashTable Key Prefix for User IDs. Concatenated
+// with a UserID for a HashTable they own
 const AuthIDSetPrefix string = "authID:"
+
+// Username Key/Field for Redis UserID HashTable
 const AuthIDSetUsernameField string = "username"
+
+// Token Key/Field for Redis UserID HashTable
 const AuthIDSetTokenField string = "token"
+
+// Token Deadline DateTime Key/Field for Redis UserID HashTable
 const AuthIDSetTokenStaleDateTimeField string = "stale"
+
+// Token Use Counter Key/Field for Redis UserID HashTable
 const AuthIDSetTokenUseCounter string = "tokenUses"
 
 // Encryption Configurables
+
+// TLS Certificate File Location from root of the project
 const CrtLocation string = "./tlscert.crt"
+
+// TLS Key File Location from root of the project
 const KeyLocation string = "./tlskey.key"
-const EscapeChar byte = byte('~')
 
 // Token Configurables
-const TokenLength int = 256
-const TokenStaleTime time.Duration = time.Minute * 5
-const SuperUserTokenCount int = 10
 
-// Super User Configurables
+// Length of Characters For Secret User Authentication Token
+const TokenLength int = 256
+
+// Time A Token stays good for before it is rejected and a new login
+// is required
+const TokenStaleTime time.Duration = time.Minute * 5
+
+// UserID For Request Made From the Server rather than
+// from a user. Useful for papertrails.
 const SuperUserID string = "-1"
 
+// Listener Secure Configurables
+
+// TLS Configuration for HTTPS Server and SSL with TCP
+//
 // This will be assigned on startup then left unchanged
 var tlsConfig tls.Config = tls.Config{}
 
+// Set of Commands that need to be done over encrypted connections.
+//
 // This Map is a Set!
 // This should never change during runtime!
 var secureMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
@@ -55,17 +88,28 @@ var secureMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
 	policy.CmdLogin:    true,
 }
 
+// struct for ease of use when marshalling to JSON.
+// Carries the fields used when a user is gathered
+// from cmdGetUser
 type UserInfo struct {
 	AuthID   string
 	Username string
 }
 
+// Required Fields for any connection
+// see calculateResponse
+// or see switchOnCommand
+//
+// The structure is wrapped for easy of returning from a
+// constructing function.
 type SuperUserRequest struct {
 	Header             policy.RequestHeader
 	BodyFactories      policy.RequestBodyFactories
 	IsSecureConnection bool
 }
 
+// ServerTask Startup Function for Encryption. Takes care of initialization.
+// Loads Certificates and Keys from files and configures TLS.
 func StartEncryption() (func(), error) {
 	log.Printf("Loading Certificate From: %s \nand Key From: %s\n", CrtLocation, KeyLocation)
 	cert, err := tls.LoadX509KeyPair(CrtLocation, KeyLocation)
@@ -82,6 +126,8 @@ func StartEncryption() (func(), error) {
 	return cleanUpEncryption, nil
 }
 
+// CleanUp Function returned by Startup function. Doesn't do anything, but here
+// for consistency.
 func cleanUpEncryption() {
 	log.Println("Cleaning Up Encryption Logic")
 }
@@ -103,6 +149,9 @@ func SecureTCPConnIfNeeded(clientConn *TCPClientConn, prefix TCPRequestPrefix) (
 	return true, nil
 }
 
+// returns if the given command needs an encrypted connection or not
+//
+// see "secureMap"
 func NeedsSecurity(cmd policy.ClientCmd) bool {
 	result, exists := secureMap[cmd]
 	return exists && result
@@ -114,12 +163,16 @@ func NeedsSecurity(cmd policy.ClientCmd) bool {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// JSON Fields for the Register Endpoint/Command
 type RegisterCommandBody struct {
 	Username string
 	Password string
 }
 
-// TODO Add rate Limiting
+// Register Endpoint. Registers a user to the database. It requires a unique username/identifier
+// and a relatively strong password
+//
+// TODO(TFlexSoom): Add rate Limiting
 func Register(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	if !isSecureConnection {
 		return policy.RawUnsuccessfulResponse("Unsecure Connection!")
@@ -144,6 +197,8 @@ func Register(header policy.RequestHeader, bodyFactories policy.RequestBodyFacto
 	}
 }
 
+// Takes a string and returns if it would be a strong password.
+// returns -> true if it is strong and false otherwise
 func passwordIsStrong(password string) bool {
 	length := len(password)
 	hasUpper, hasLower, hasNumber, hasSymbol, hasMystery := false, false, false, false, false
@@ -170,6 +225,11 @@ func passwordIsStrong(password string) bool {
 	return length >= 8 && passwordIsStrong
 }
 
+// Adds an account to the database, hashing the password and associating
+// starting values in all typical fields in redis
+//
+// returns bool :: true/false if the user can be added to the database
+//        error :: if writing to the database failed it will be non-nil
 func CreateAccount(username string, password string) (bool, error) {
 	if len(username) > redis.RedisKeyMax {
 		return false, errors.New("Attempting To Store Too Large of a Username!")
@@ -217,11 +277,16 @@ func CreateAccount(username string, password string) (bool, error) {
 //// Login
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// JSON Fields for the Login Endpoint/Command
 type LoginCommandBody struct {
 	Username string
 	Password string
 }
 
+// Login a user to receive a valid token to continue making requests
+// under. The connection must be secure and correctly formatted
+// otherwise an error will be returned.
 func Login(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	if !isSecureConnection {
 		return policy.RawUnsuccessfulResponse("Unsecure Connection!")
@@ -247,6 +312,9 @@ func Login(header policy.RequestHeader, bodyFactories policy.RequestBodyFactorie
 	return policy.RawSuccessfulResponseBytes(&token)
 }
 
+// Returns if the given login is valid or invalid based on
+// username and hashed password. If it exists in the UserPass
+// hashMap then it is a valid Username + Password Combination.
 func IsValidLogin(username string, password string) bool {
 	if len(username) > redis.RedisKeyMax {
 		return false
@@ -261,6 +329,9 @@ func IsValidLogin(username string, password string) bool {
 	return err != nil || actualChecksumHex != reqChecksumHex
 }
 
+// Returns the UserID (numerical but put into a string for
+// ease of response) for a given username. Used for login
+// with specific error handling used for the use case flow.
 func getAuthID(username string) (string, error) {
 	if len(username) > redis.RedisKeyMax {
 		return "", errors.New("Attempting To Use Too Large of a Username!")
@@ -277,6 +348,10 @@ func getAuthID(username string) (string, error) {
 	return authID, nil
 }
 
+// Constructs a new token and deadline for the token going stale for
+// a user. Usually occurs on a successful login. Token can be
+// refreshed any number of times. It is then used for identity
+// authentication in future requests.
 func ConstructNewToken(authID string) ([]byte, time.Time, error) {
 	authIDSet := AuthIDSetPrefix + authID
 	token := make([]byte, TokenLength)
@@ -305,10 +380,14 @@ func ConstructNewToken(authID string) ([]byte, time.Time, error) {
 //// Public AuthID Command Handler
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// JSON Fields for the User Lookup Endpoint/Command
 type GetUserCommandBody struct {
 	Username string
 }
 
+// Endpoint Returns the User ID associated with the supplied username. Useful for finding friends
+// and connecting other information.
 func GetUser(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	rqBody := GetUserCommandBody{}
 	bodyFactories.ParseFactory(&rqBody)
@@ -333,7 +412,17 @@ func GetUser(header policy.RequestHeader, bodyFactories policy.RequestBodyFactor
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// When using, make sure to defer SuperUserRequest.Cleanup on a succssful call
+// Functin to construct internal request with from a "Super User". Useful for
+// using endpoints with a specific papertrail. Super Users have a lot
+// more privaledges in checks than other users, but they can do this because
+// they skip the parsing steps. SigVerify automatically returns a nil error.
+// This could(/should) never happen from outside the system.
+//
+// isTask :: true if task is making the request and false otherwise
+//      (old parameter and not necessary)
+// cmd    :: Selected Endpoint to be requested
+// args   :: struct to use for args for endpoint
+// returns -> SuperUserRequest struct for making the request.
 func RequestWithSuperUser(isTask bool, cmd policy.ClientCmd, args interface{}) (SuperUserRequest, error) {
 	// shortcut bodyfactory using reflection
 	bodyFactories := policy.RequestBodyFactories{
@@ -354,7 +443,14 @@ func RequestWithSuperUser(isTask bool, cmd policy.ClientCmd, args interface{}) (
 	return SuperUserRequest{Header: header, BodyFactories: bodyFactories, IsSecureConnection: true}, nil
 }
 
-// Cleanup SuperUser Code
+// Typical Verification of users for authentication. Used in most
+// other endpoints as SigVerify in RequestBodyFactories
+//
+// Takes the userID, Signature (hash of token and content), and content
+// to see if the user can indeed make the request (they are who they say
+// they are).
+//
+// returns an error if they are not who they say they are.
 func SigVerification(userID string, signature string, content *[]byte) error {
 	authIDSet := AuthIDSetPrefix + userID
 	redisReply := make([]string, 3)

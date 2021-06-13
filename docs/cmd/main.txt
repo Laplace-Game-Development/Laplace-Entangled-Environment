@@ -1,0 +1,40 @@
+package main // import "laplace-entangled-env.com/cmd"
+
+Laplace-Entanglement-Environment Application Package. This represents all
+the modules necessary to run the application. This service provides a
+realtime server for multiple games at once using a database, TCP, and HTTP.
+
+VARIABLES
+
+var serverInitTaskList []ServerTask = []ServerTask{
+
+	redis.StartDatabase,
+	zeromq.StartZeroMqComms,
+
+	route.StartEncryption,
+	data.StartRoomsSystem,
+	schedule.StartTaskQueue,
+	schedule.StartCronScheduler,
+	data.StartGameLogic,
+	route.StartListener,
+}
+    List of "ServerTask" functions that need to be run to start the application.
+    WARNING: Some of the tasks are dependent on the startup of other tasks
+
+
+FUNCTIONS
+
+func invokeServerStartup(fn ServerTask) func()
+    Consumer for "Server Tasks". Makes sure to fault on error and return a
+    cleanup function on success.
+
+func main()
+    Entry Function
+
+
+TYPES
+
+type ServerTask func() (func(), error)
+    A startup function which returns a function to call when exitting/cleaning
+    up. If instead an error is produced The application is expected to Fault.
+

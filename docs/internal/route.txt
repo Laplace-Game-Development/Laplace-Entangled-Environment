@@ -1,0 +1,504 @@
+package route // import "laplace-entangled-env.com/internal/route"
+
+Route Represents the routing and listening to connections. This module takes
+care of the communication links to users and clients. They will forward
+commands to data driven modules in `/data`. The Listener module makes sure
+to listen to connections over TCP and HTTP (maybe Websocket too later.) We
+also have the parser which uses the policy directives to break apart the
+user payloads into understandable commands. Secure takes care of any
+encryption necessary over the wire.
+
+CONSTANTS
+
+const AuthIDAtomicCounter string = "authIDAtomicCounter"
+    Redis Key for the Atomic UserID Counter
+
+const AuthIDSetPrefix string = "authID:"
+    Redis HashTable Key Prefix for User IDs. Concatenated with a UserID for a
+    HashTable they own
+
+const AuthIDSetTokenField string = "token"
+    Token Key/Field for Redis UserID HashTable
+
+const AuthIDSetTokenStaleDateTimeField string = "stale"
+    Token Deadline DateTime Key/Field for Redis UserID HashTable
+
+const AuthIDSetTokenUseCounter string = "tokenUses"
+    Token Use Counter Key/Field for Redis UserID HashTable
+
+const AuthIDSetUsernameField string = "username"
+    Username Key/Field for Redis UserID HashTable
+
+const CommandBytes = 3
+    Size of Packet Header for TCP commands Byte 1 :: Metadata/Parsing info Byte
+    2 :: More Significant byte for Command Byte 3 :: Lesser Significant byte for
+    Command
+
+const CrtLocation string = "./tlscert.crt"
+    TLS Certificate File Location from root of the project
+
+const HttpHost string = "127.0.0.1"
+    HTTP Listening Host IP
+
+const HttpPort string = ":8080"
+    HTTP Host Listening Port Number
+
+const IoDeadline time.Duration = 5 * time.Millisecond
+    Time spent waiting for incomming connections before checking for control
+    signals/shutoff/etc
+
+const KeyLocation string = "./tlskey.key"
+    TLS Key File Location from root of the project
+
+const ListeningTCPIpAddress string = "127.0.0.1"
+    TCP IP Mask to listen for connections on
+
+const ListeningTCPPortNumber string = ":26005"
+    TCP Port number to listen for connections on
+
+const NumberOfTCPThreads = 5
+    Limit of Goroutines used for listening on TCP. 5 is a good number for
+    testing, but a better number would be much higher.
+
+const ShutdownDuration time.Duration = 10 * time.Second
+    Time for shutdown. Quitting Mid Handle is really bad. This should be longer
+    than any duration
+
+const SuperUserID string = "-1"
+    UserID For Request Made From the Server rather than from a user. Useful for
+    papertrails.
+
+const TokenLength int = 256
+    Length of Characters For Secret User Authentication Token
+
+const TokenStaleTime time.Duration = time.Minute * 5
+    Time A Token stays good for before it is rejected and a new login is
+    required
+
+const UserAuthIDTable string = "userToAuthID"
+    Redis Key for the Username to UserID HashMap
+
+const UserPassTable string = "userPassword"
+    Redis Key for the User Password HashMap
+
+
+VARIABLES
+
+var MalformedDataMsg []byte = []byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}")
+    Constant byte string of JSON representing a data malformed error May be
+    moved to Policy
+
+var MalformedDataMsgLen int = len([]byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}"))
+    Constant integer length of a JSON byte string representing a data malformed
+    error May be moved to Policy
+
+var commandMap map[int64]policy.ClientCmd = map[int64]policy.ClientCmd{
+	1<<0 + 0: policy.CmdEmpty,
+	1<<0 + 1: policy.CmdRegister,
+	1<<0 + 2: policy.CmdLogin,
+	1<<4 + 0: policy.CmdAction,
+	1<<4 + 1: policy.CmdObserve,
+	1<<5 + 0: policy.CmdGetUser,
+	1<<9 + 0: policy.CmdGameCreate,
+	1<<9 + 1: policy.CmdGameJoin,
+	1<<9 + 2: policy.CmdGameLeave,
+	1<<9 + 3: policy.CmdGameDelete,
+}
+    commandMap is the mappings of the 2 byte codes to ClientCommands.
+    predominantly useful in parsing commands for TCP.
+
+    This should never change during runtime!
+
+var listenerThreadPool util.ThreadPool = util.NewThreadPool(3)
+    Thread Pool for Connection Listening. This stores the threads and context
+    for all listening for connections. The goroutines themselves will spawn
+    other goroutines so we use more than 3 "threads" for the full application.
+
+    1 for TCP 1 For HTTP 1 For WebSocket?
+
+var postOnlyCmdMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
+	policy.CmdError:      false,
+	policy.CmdEmpty:      false,
+	policy.CmdRegister:   true,
+	policy.CmdLogin:      true,
+	policy.CmdAction:     true,
+	policy.CmdObserve:    true,
+	policy.CmdGetUser:    true,
+	policy.CmdGameCreate: true,
+	policy.CmdGameJoin:   true,
+	policy.CmdGameLeave:  true,
+	policy.CmdGameDelete: true,
+}
+    A Constant map of what commands should be made with a POST HTTP Request
+    rather than a GET Request. This is for semantic and API design reasons.
+
+    This should never change during runtime!
+
+var secureMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
+	policy.CmdRegister: true,
+	policy.CmdLogin:    true,
+}
+    Set of Commands that need to be done over encrypted connections.
+
+    This Map is a Set! This should never change during runtime!
+
+var tlsConfig tls.Config = tls.Config{}
+    TLS Configuration for HTTPS Server and SSL with TCP
+
+    This will be assigned on startup then left unchanged
+
+
+FUNCTIONS
+
+func ConstructNewToken(authID string) ([]byte, time.Time, error)
+    Constructs a new token and deadline for the token going stale for a user.
+    Usually occurs on a successful login. Token can be refreshed any number of
+    times. It is then used for identity authentication in future requests.
+
+func CreateAccount(username string, password string) (bool, error)
+    Adds an account to the database, hashing the password and associating
+    starting values in all typical fields in redis
+
+    returns bool :: true/false if the user can be added to the database
+
+        error :: if writing to the database failed it will be non-nil
+
+func GetUser(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    Endpoint Returns the User ID associated with the supplied username. Useful
+    for finding friends and connecting other information.
+
+func IsValidLogin(username string, password string) bool
+    Returns if the given login is valid or invalid based on username and hashed
+    password. If it exists in the UserPass hashMap then it is a valid Username +
+    Password Combination.
+
+func Login(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    Login a user to receive a valid token to continue making requests under. The
+    connection must be secure and correctly formatted otherwise an error will be
+    returned.
+
+func NeedsSecurity(cmd policy.ClientCmd) bool
+    returns if the given command needs an encrypted connection or not
+
+    see "secureMap"
+
+func ParseCommand(mostSignificant byte, leastSignificant byte) (policy.ClientCmd, error)
+    Parse Command takes a two byte code and returns the associated command or an
+    error if it doesn't exist. Used mainly in TCP Request Parsing
+
+func Register(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    Register Endpoint. Registers a user to the database. It requires a unique
+    username/identifier and a relatively strong password
+
+    TODO(TFlexSoom): Add rate Limiting
+
+func SecureTCPConnIfNeeded(clientConn *TCPClientConn, prefix TCPRequestPrefix) (bool, error)
+    Secure the current TCP Listener connection. Return True if a new Connection
+    was created Return an error if somethign went wrong
+
+func SigVerification(userID string, signature string, content *[]byte) error
+    Typical Verification of users for authentication. Used in most other
+    endpoints as SigVerify in RequestBodyFactories
+
+    Takes the userID, Signature (hash of token and content), and content to see
+    if the user can indeed make the request (they are who they say they are).
+
+    returns an error if they are not who they say they are.
+
+func StartEncryption() (func(), error)
+    ServerTask Startup Function for Encryption. Takes care of initialization.
+    Loads Certificates and Keys from files and configures TLS.
+
+func StartListener() (func(), error)
+    ServerTask Startup Function for Conneciton Listening. Takes care of
+    initialization.
+
+func base64Decode(data *[]byte) ([]byte, error)
+    Decodes the data byte slice from base64 and returns a new byte slice
+    representing the data.
+
+    data :: base64 encoded data returns -> copy of the data which is base64
+    decoded
+
+func calculateResponse(requestHeader policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecured bool) ([]byte, error)
+    takes the required parameters and ensures any listener that is ready to send
+    their command to data has the required components. This will parse and
+    perform the commmand requested. It will then return the calculated byte
+    slice response.
+
+    requestHeader :: Common Fields for all requests including authentication and
+    endpoint selection bodyFactories :: Arguments for the commands in the form
+    of first order functions isSecured :: Whether the request came over an
+    encrypted connection (i.e. SSL/SSH/HTTPS)
+
+    returns []byte :: byte slice response for user
+
+        error :: non-nil when an invalid command is sent or an error occurred when processing
+           typically means request was rejected.
+
+func checkPost(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *http.Request) bool
+    Returns whether the given HTTP request is a POST request if needed. see
+    "postOnlyCmdMap"
+
+    clientCmd :: Selected Endpoint/Command writer :: writer to be written to
+    with response data for user req :: Given HTTP Request with associated
+    non-command data (args and authentication) returns -> bool
+
+        true  | continue processing the request
+        false | ignore the request. An error was already given to the user
+
+func cleanUpEncryption()
+    CleanUp Function returned by Startup function. Doesn't do anything, but here
+    for consistency.
+
+func cleanUpListener()
+    CleanUp Function returned by Startup function. Stops all listeners by
+    "Finish"ing the threadpool. This means that within the given
+    "ShutdownDuration" the listeners should be closed.
+
+func computeTCPKeepAlive(clientConn TCPClientConn) bool
+    After successful Read->Response should we continue communications?
+
+    clientConn :: Metadata and reference to TCP Connection
+
+    returns -> bool
+
+         true | keep the connection alive
+        false | close the connection
+
+func decodeASN1Attachment(data *[]byte) (policy.RequestAttachment, int, error)
+    Decodes the data byte slice from ASN1 using policy.RequestAttachment. It
+    then returns the structure for authentication purposes
+
+    data :: ASN1 representing a RequestAttachment structure
+
+    returns -> policy.RequestAttachment :: Authentication Data For Requests
+
+        int :: index of the rest of the data i.e. args
+        error :: if parsing goes wrong, error is returned
+             else it returns nil
+
+func decodeJsonAttachment(data *[]byte) (policy.RequestAttachment, int, error)
+    Decodes the data byte slice from JSON using policy.RequestAttachment. It
+    then returns the structure for authentication purposes
+
+    data :: JSON representing a RequestAttachment structure
+
+    returns -> policy.RequestAttachment :: Authentication Data For Requests
+
+        int :: index of the rest of the data i.e. args
+        error :: if parsing goes wrong, error is returned
+             else it returns nil
+
+func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (policy.RequestHeader, policy.RequestBodyFactories, error)
+    Using the structuring metadata and the rest of the payload data, the
+    function generates a request to the server and returns the information
+    needed to "calculateResponse"
+
+    length :: number of bytes in data data :: payload/data for request i.e.
+    Command, Auth, and Args prefix :: Structuring Metadata
+
+    returns {
+
+        	    RequestHeader :: header data used for all request (Command and Authentication)
+             RequestBodyFactories ::	Transform functions for getting request arguments
+             error :: If parsing goes wrong and the request is illformed an error is returned
+
+    }
+
+func getAuthID(username string) (string, error)
+    Returns the UserID (numerical but put into a string for ease of response)
+    for a given username. Used for login with specific error handling used for
+    the use case flow.
+
+func getHttpHandler(command policy.ClientCmd) func(writer http.ResponseWriter, req *http.Request)
+    Creates a First Order Function for the given command. Useful for when adding
+    handlers in the initialization function for HTTP.
+
+func handleHttp(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *http.Request)
+    Handles a given HTTP request with the given Client Command (endpoint), and
+    data
+
+    clientCmd :: Selected Endpoint/Command writer :: writer to be written to
+    with response data for user req :: Given HTTP Request with associated
+    non-command data (args and authentication)
+
+func handleTCPConnection(ctx context.Context, clientConn TCPClientConn)
+    TCP goroutine function, using the prepackaged information to serve the
+    connected client. It parses the data it receives to compile a response.
+    Function will loop until the connection is closed.
+
+    ctx :: Owning Context clientConn :: Metadata and reference to TCP Connection
+
+func parseASN1(ptr interface{}, data *[]byte) error
+    Wrapper Function for asn1 for unmarshalling for extra error handling.
+
+func parseBody(ptr interface{}, prefix TCPRequestPrefix, body *[]byte) error
+    Function for generating structs based on a byte slice. Used to create
+    RequestBodyFactories.
+
+    ptr should be a pointer to the interface, not the interface itself!!!!
+
+    ptr :: pointer to a struct to populate. Make sure fields are public
+
+        (see json.Unmarshall in golang docs)
+
+    prefix :: Structure Metadata body :: byte slice of request data
+
+func parseHeaderInfo(req *http.Request, body *[]byte) policy.RequestAttachment
+    Creates the Request Attachment (Authentication Portion) of the request
+
+    req :: HTTP Request with associated data body :: slice of data representing
+    the request body. We use a parameter
+
+        rather than grabbing it all to optimize the process. It needs to be
+        used by other functions, so passing it in is better than creating
+        a variable just to be garbage collected
+
+    returns -> policy.RequestAttachment :: the authentication components found
+
+        or empty components if none are found in header/cookies/or body
+
+func parseJson(ptr interface{}, data *[]byte) error
+    Wrapper Function for json.UnMarshall in case we do our own unmarshalling for
+    any reason
+
+func parseRequestAttachment(isJSON bool, data *[]byte) (policy.RequestAttachment, int, error)
+    Creates the Authentication Structure based on the structure and byte slice
+    provided to the function
+
+    isJSON :: whether the byte slice is JSON or ASN1 data :: byte slice of TCP
+    Request Data
+
+func passwordIsStrong(password string) bool
+    Takes a string and returns if it would be a strong password. returns -> true
+    if it is strong and false otherwise
+
+func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool
+    Read and Gather Byte Response for a TCP Client Connection
+
+    clientConn :: Metadata and reference to TCP Connection dataIn :: byte slice
+    data read in for
+
+        Command, Args, Authentication, etc.
+
+    returns -> bool
+
+         true | command was successful
+        false | command was unsuccessful
+
+func startHTTPListening(ctx context.Context)
+    Attaches Path Handlers for HTTP Web Server. Uses Paths to communicate
+    command used. i.e. /user/ -> CmdGetUser
+
+    ctx :: Owning Context for HTTP Listener
+
+func startTCPListening(ctx context.Context)
+    Creates TCP Connection Listener(s) with a designated threadpool and
+    addressing. It submits goroutine each time it finds a connection. If no
+    goroutine is available in the threadpool the listener blocks until one is
+    found.
+
+    ctx :: Owning Context
+
+func switchOnCommand(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) ([]byte, error)
+    General Function for generating responsens and processing request. Once
+    these fields are populated the request is ready (see calculateResponse).
+
+    requestHeader :: Common Fields for all requests including authentication and
+    endpoint selection bodyFactories :: Arguments for the commands in the form
+    of first order functions isSecured :: Whether the request came over an
+    encrypted connection (i.e. SSL/SSH/HTTPS)
+
+    returns []byte :: byte slice response for user
+
+        error :: non-nil when an invalid command is sent or an error occurred when processing
+           typically means request was rejected.
+
+func writeTCPResponse(clientConn TCPClientConn, response *[]byte, length int) error
+    Write byte slice to client
+
+    clientConn :: Metadata and reference to TCP Connection response :: byte
+    slice of what needs to be sent to client length :: number of bytes in byte
+    slice
+
+    returns -> error if an error occurs and nil otherwise.
+
+
+TYPES
+
+type GetUserCommandBody struct {
+	Username string
+}
+    JSON Fields for the User Lookup Endpoint/Command
+
+type LoginCommandBody struct {
+	Username string
+	Password string
+}
+    JSON Fields for the Login Endpoint/Command
+
+type RegisterCommandBody struct {
+	Username string
+	Password string
+}
+    JSON Fields for the Register Endpoint/Command
+
+type SuperUserRequest struct {
+	Header             policy.RequestHeader
+	BodyFactories      policy.RequestBodyFactories
+	IsSecureConnection bool
+}
+    Required Fields for any connection see calculateResponse or see
+    switchOnCommand
+
+    The structure is wrapped for easy of returning from a constructing function.
+
+func RequestWithSuperUser(isTask bool, cmd policy.ClientCmd, args interface{}) (SuperUserRequest, error)
+    Functin to construct internal request with from a "Super User". Useful for
+    using endpoints with a specific papertrail. Super Users have a lot more
+    privaledges in checks than other users, but they can do this because they
+    skip the parsing steps. SigVerify automatically returns a nil error. This
+    could(/should) never happen from outside the system.
+
+    isTask :: true if task is making the request and false otherwise
+
+        (old parameter and not necessary)
+
+    cmd :: Selected Endpoint to be requested args :: struct to use for args for
+    endpoint returns -> SuperUserRequest struct for making the request.
+
+type TCPClientConn struct {
+	conn         net.Conn
+	isSecured    bool
+	isReadNeeded bool
+}
+    Wrapper Structure with boolean fields for a TCP Connection. used to easily
+    differentiate between secure and insecure connections. It also helps in
+    deciding if the TCP connection needs to parse more requests (HTTP requests
+    close connections after one requests, but TCP connections do not.)
+
+type TCPRequestPrefix struct {
+	NeedsSecurity bool // First Most Sig Bit
+	IsBase64Enc   bool // Second Most Sig Bit
+	IsJSON        bool // Third Most Sig Bit
+}
+    First byte of a TCP request. This is a struct of booleans about how the
+    request is structured over TCP.
+
+func parseTCPPrefix(length int, data *[]byte) (TCPRequestPrefix, error)
+    Gather TCP Prefix. Prefix is the first Byte of a TCP Request. It instructs
+    us how the data is structured.
+
+    length :: number of bytes in data data :: payload/data for request i.e.
+    Command, Auth, and Args
+
+    returns -> TCPRequestPrefix :: Boolean struct for Structuring metadata
+
+type UserInfo struct {
+	AuthID   string
+	Username string
+}
+    struct for ease of use when marshalling to JSON. Carries the fields used
+    when a user is gathered from cmdGetUser
+

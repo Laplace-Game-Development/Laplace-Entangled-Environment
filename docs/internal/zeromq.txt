@@ -1,0 +1,28 @@
+package zeromq // import "laplace-entangled-env.com/internal/zeromq"
+
+The ZeroMQ module is the holder and initializer for the third-party ZeroMQ
+Library.
+
+CONSTANTS
+
+const ZeromqHost string = "tcp://127.0.0.1"
+    ZeroMQ URI Client Connection IPs
+
+const ZeromqMask string = "tcp://*"
+    ZeroMQ URI Host Binding Mask
+
+
+VARIABLES
+
+var MasterZeroMQ *zmq4.Context = nil
+    ZeroMQ Context Reference -- Defined on Startup
+
+
+FUNCTIONS
+
+func StartZeroMqComms() (func(), error)
+    ZeroMQ Server Task. Starts ZeroMQ and Defines Context
+
+func cleanUpZeroMq()
+    ZeroMQ Cleanup. Terminates ZeroMQ Context
+

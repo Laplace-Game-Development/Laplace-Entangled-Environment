@@ -22,3 +22,7 @@ The application will support running of different binaries to communicate with. 
 
 ## Testing the Project
 `go test ./...` will run all tests associated with the application
+
+## Refreshing Documentation for Project
+- For Windows: `gendoc.bat`
+- For Linux/OSX: `gendoc.sh`

@@ -12,6 +12,9 @@ import (
 	"laplace-entangled-env.com/internal/util"
 )
 
+// commandMap is the mappings of the 2 byte codes to ClientCommands.
+// predominantly useful in parsing commands for TCP.
+//
 // This should never change during runtime!
 var commandMap map[int64]policy.ClientCmd = map[int64]policy.ClientCmd{
 	1<<0 + 0: policy.CmdEmpty,
@@ -28,7 +31,8 @@ var commandMap map[int64]policy.ClientCmd = map[int64]policy.ClientCmd{
 
 //// Functions!
 
-// 1. Parse Command and add to Header
+// Parse Command takes a two byte code and returns the associated command
+// or an error if it doesn't exist. Used mainly in TCP Request Parsing
 func ParseCommand(mostSignificant byte, leastSignificant byte) (policy.ClientCmd, error) {
 	var cmd int64 = int64(mostSignificant)
 	cmd = (cmd << 8) + int64(leastSignificant)
@@ -42,7 +46,11 @@ func ParseCommand(mostSignificant byte, leastSignificant byte) (policy.ClientCmd
 	return result, nil
 }
 
-// 2. Parse Request Attachment and add to Header
+// Creates the Authentication Structure based on the structure
+// and byte slice provided to the function
+//
+// isJSON :: whether the byte slice is JSON or ASN1
+// data   :: byte slice of TCP Request Data
 func parseRequestAttachment(isJSON bool, data *[]byte) (policy.RequestAttachment, int, error) {
 	if isJSON {
 		return decodeJsonAttachment(data)
@@ -51,9 +59,15 @@ func parseRequestAttachment(isJSON bool, data *[]byte) (policy.RequestAttachment
 	return decodeASN1Attachment(data)
 }
 
-// 4. Create a factory for body Payload Structs for Handling Commands
-
+// Function for generating structs based on a byte slice. Used to create
+// RequestBodyFactories.
+//
 // ptr should be a pointer to the interface, not the interface itself!!!!
+//
+// ptr    :: pointer to a struct to populate. Make sure fields are public
+//     (see json.Unmarshall in golang docs)
+// prefix :: Structure Metadata
+// body   :: byte slice of request data
 func parseBody(ptr interface{}, prefix TCPRequestPrefix, body *[]byte) error {
 	var err error
 	if prefix.IsBase64Enc {
@@ -70,7 +84,17 @@ func parseBody(ptr interface{}, prefix TCPRequestPrefix, body *[]byte) error {
 	return parseASN1(ptr, body)
 }
 
-// 5. Switch based on RequestHeader.Command
+// General Function for generating responsens and processing request.
+// Once these fields are populated the request is ready
+// (see calculateResponse).
+//
+// requestHeader :: Common Fields for all requests including authentication and endpoint selection
+// bodyFactories :: Arguments for the commands in the form of first order functions
+// isSecured     :: Whether the request came over an encrypted connection (i.e. SSL/SSH/HTTPS)
+//
+// returns []byte :: byte slice response for user
+//          error :: non-nil when an invalid command is sent or an error occurred when processing
+//             typically means request was rejected.
 func switchOnCommand(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) ([]byte, error) {
 	var res policy.CommandResponse
 
@@ -141,12 +165,26 @@ func switchOnCommand(header policy.RequestHeader, bodyFactories policy.RequestBo
 //// Utility Encoding Functions
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Decodes the data byte slice from base64 and returns a new byte slice representing the data.
+//
+// data :: base64 encoded data
+// returns -> copy of the data which is base64 decoded
 func base64Decode(data *[]byte) ([]byte, error) {
 	res := make([]byte, base64.StdEncoding.DecodedLen(len(*data)))
 	_, err := base64.StdEncoding.Decode(*data, res)
 	return res, err
 }
 
+// Decodes the data byte slice from JSON using policy.RequestAttachment. It
+// then returns the structure for authentication purposes
+//
+// data :: JSON representing a RequestAttachment structure
+//
+// returns -> policy.RequestAttachment :: Authentication Data For Requests
+//            int :: index of the rest of the data i.e. args
+//            error :: if parsing goes wrong, error is returned
+//                 else it returns nil
 func decodeJsonAttachment(data *[]byte) (policy.RequestAttachment, int, error) {
 	res := policy.RequestAttachment{}
 	err := json.Unmarshal(*data, &res)
@@ -167,6 +205,15 @@ func decodeJsonAttachment(data *[]byte) (policy.RequestAttachment, int, error) {
 	return res, bodyFactoryStart, nil
 }
 
+// Decodes the data byte slice from ASN1 using policy.RequestAttachment. It
+// then returns the structure for authentication purposes
+//
+// data :: ASN1 representing a RequestAttachment structure
+//
+// returns -> policy.RequestAttachment :: Authentication Data For Requests
+//            int :: index of the rest of the data i.e. args
+//            error :: if parsing goes wrong, error is returned
+//                 else it returns nil
 func decodeASN1Attachment(data *[]byte) (policy.RequestAttachment, int, error) {
 	res := policy.RequestAttachment{}
 	body, err := asn1.Unmarshal(*data, &res)
@@ -179,10 +226,14 @@ func decodeASN1Attachment(data *[]byte) (policy.RequestAttachment, int, error) {
 	return res, bodyStart, nil
 }
 
+// Wrapper Function for json.UnMarshall in case we
+// do our own unmarshalling for any reason
 func parseJson(ptr interface{}, data *[]byte) error {
 	return json.Unmarshal(*data, ptr)
 }
 
+// Wrapper Function for asn1 for unmarshalling for extra
+// error handling.
 func parseASN1(ptr interface{}, data *[]byte) error {
 	empty, err := asn1.Unmarshal(*data, ptr)
 	if err != nil {

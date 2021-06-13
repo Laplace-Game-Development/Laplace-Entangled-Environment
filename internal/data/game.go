@@ -17,29 +17,52 @@ import (
 	"laplace-entangled-env.com/internal/zeromq"
 )
 
-// Configurables
-const WaitDurationForGameStart time.Duration = 10 * time.Second
+//// Configurables
+
+// Time to wait for Game to Finish cleaning up
+const WaitDurationForGameStop time.Duration = 10 * time.Second
+
+// Time to Wait For Game to Respond to an Action
 const WaitDurationForGameAction time.Duration = 3 * time.Second
+
+// Commands For Initialization
+
+// Shell Command to execute
 const CommandToExec string = "node"
+
+// Game Port Number
 const GamePortNum string = "5011"
+
+// Game Port Number (prefixed with colon)
 const GamePort string = ":" + GamePortNum
 
-var CommandArgs []string = []string{"./node-layer/index.js", "--binding=5011"}
+// Shell Command Args
+// This value should not change at runtime
+var CommandArgs []string = []string{"./node-layer/index.js", "--binding=" + GamePortNum}
 
-// Global Variables | Singletons
+//// Global Variables | Singletons
+
+// Game Context (start stop signals)
 var commandContext context.Context = nil
+
+// Context Cancel Function
 var cancelFunc func() = nil
 
+// ServerTask Startup Function for the third-party Game application.
+// Takes care of initialization. returns an error if the
+// game can't be started (i.e. prerequisites are not met)
 func StartGameLogic() (func(), error) {
 	executeCommand()
 	return cleanUpGameLogic, nil
 }
 
+// Cleanup Logic. Tries to terminate game, exits if it doesn't quit in
+// a timely manner. Reports error if it could not close game.
 func cleanUpGameLogic() {
 	log.Println("Cleaning Up Game Logic")
 	cancelFunc()
 
-	deadlineForStop := time.Now().Add(WaitDurationForGameStart)
+	deadlineForStop := time.Now().Add(WaitDurationForGameStop)
 	done := false
 	for deadlineForStop.Before(time.Now()) {
 		select {
@@ -55,6 +78,7 @@ func cleanUpGameLogic() {
 	}
 }
 
+// Wrapper and secure configuration for os/exec
 func executeCommand() {
 	commandContext, cancelFunc = context.WithCancel(context.Background())
 
@@ -81,6 +105,16 @@ func executeCommand() {
 	}()
 }
 
+// Send a string of bytes to the third party application using ZeroMQ
+// (The Game SDK will take care of setting up the "server" part of
+// communication. We just connect and send a string, waiting for a
+// a response). Thread Safe with ZeroMQ!
+//
+// dataIn :: string to sent to game (usually a JSON.)
+//
+// returns -> string :: response from third-party game
+//         -> error :: non-nil if it couldn't send data
+//                to the game.
 func BytesToGame(dataIn string) (string, error) {
 	// Create a Zeromq Request Port
 	req, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
@@ -106,6 +140,15 @@ func BytesToGame(dataIn string) (string, error) {
 	return BytesFromGame(req)
 }
 
+// Receive a string of bytes from the game.(This is
+// used with BytesToGame and there should not be a
+// need to call this function)
+//
+// req :: ZeroMQ Request Socket
+//
+// returns -> string :: response from third-party game
+//         -> error :: non-nil if it couldn't receive
+//                data from game
 func BytesFromGame(req *zmq4.Socket) (string, error) {
 	poller := zmq4.NewPoller()
 
@@ -132,16 +175,23 @@ func BytesFromGame(req *zmq4.Socket) (string, error) {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// JSON Fields for the Apply Action Command Args
 type applyActionRequest struct {
 	GameID string
 	Relay  map[string]interface{}
 }
 
+// JSON Fields for marshalling a JSON to the Game
 type actionServerPayload struct {
 	State map[string]interface{}
 	Relay map[string]interface{}
 }
 
+// The Apply Action Endpoint sends the payload to the game.
+// This will be the most highly used endpoint as this represents
+// the main transport method to games. The Game actually runs
+// the code, but the application loads the data for the
+// game from the database.
 func ApplyAction(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	// 1. Verify Request
 	err := bodyFactories.SigVerify(header.UserID, header.Sig)
@@ -207,10 +257,18 @@ func ApplyAction(header policy.RequestHeader, bodyFactories policy.RequestBodyFa
 	return policy.RawSuccessfulResponse(response)
 }
 
+// JSON Fields for the GetGameData Command Args
 type getGameDataRequest struct {
 	GameID string
 }
 
+// The Get Game Data Endpoint gathers all the data
+// in the database for a game. The Games are public
+// by default so anyone should be able to observe
+//
+// However, observers cannot change the game in
+// any way. You have to be on the roster to apply
+// an action
 func GetGameData(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	// 1. Get Game Info From Request
 	err := bodyFactories.SigVerify(header.UserID, header.Sig)

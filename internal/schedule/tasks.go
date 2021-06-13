@@ -16,25 +16,53 @@ import (
 	"laplace-entangled-env.com/internal/zeromq"
 )
 
-// ZeroMQ/Task Server Settings
+//// Configurables
+
+// Number of Workers to Distribute to with ZeroMQ
 const NumberOfTaskWorkers uint8 = 5
+
+// Proxy Publish Port for sending to (application)
 const ProxyPubPort string = ":5565"
+
+// Proxy Sub Port for receiving From (workers)
 const ProxySubPort string = ":5566"
+
+// Proxy Control Port for Interrupting Proxy
 const ProxyControlPort string = ":5567"
 
-// Configurables
+// Time that a Worker should sleep/wait in the event
+// of no tasks being ready
 const EmptyQueueSleepDuration time.Duration = time.Duration(time.Minute)
+
+// Number of Event Health Tasks to pop off of redis
+// Maybe this should be in schedule.go
 const EventHealthTaskCapacity uint8 = 50
+
+// Labeled MagicRune as a joke for Golangs named type
+// Used as seperator for communicating work to workers
+// Task Name/Prefix + MagicRune + Params/Data
 const MagicRune rune = '~'
 
-// Task Prefixes
+//// Task Name/Prefixes
+
+// Game Health Checking to garbage collect game data
 const HealthTaskPrefix string = "healthTask"
 
-// Global Variables | Singletons
+//// Global Variables | Singletons
+
+// Control Referency For Proxy Control Port
 var zeroMQProxyControl *zmq4.Socket = nil
+
+// Control Communication for Workers Input
+// Used For Cleanup
 var zeroMQWorkerChannelIn chan bool = nil
+
+// Control Communication for Workers Output
+// Used For Cleanup
 var zeroMQWorkerChannelOut chan bool = nil
 
+// ServerTask Startup Function for Schedule Task System. Creates Workers
+// and communication channels with ZeroMQ.
 func StartTaskQueue() (func(), error) {
 	// FOR CI:
 	// TODO, it may be easier to bind these to ports assigned by the database
@@ -74,13 +102,37 @@ func StartTaskQueue() (func(), error) {
 	return cleanUpTaskQueue, nil
 }
 
+// CleanUp Function returned by Startup function. Signals Workers to Finish and
+// blocks until completion.
+func cleanUpTaskQueue() {
+	log.Println("Signalling Task Workers for CleanUp")
+
+	for i := uint8(0); i < NumberOfTaskWorkers; i++ {
+		zeroMQWorkerChannelIn <- true
+	}
+
+	log.Println("Signalling Finished Waiting for response!")
+	for i := uint8(0); i < NumberOfTaskWorkers; i++ {
+		<-zeroMQWorkerChannelOut
+	}
+
+	log.Println("Task Workers Cleanup Complete!")
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
 //// Task Queue Preparation
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Start on seperate thread due to zmq_proxy
+// Starts the Proxy Communication Layer. The Application communicates to this
+// block the tasks and data that need to be worked on. The Proxy then distributes
+// the data using ZeroMQ's distribution algorithms.
+//
+// resp :: boolean channel which is used to return success/failure
+//  (since the worker loops forever)
+//
+// Should be called in a goroutine otherwise zmq_proxy will block the main "thread"
 func startAsynchronousProxy(resp chan bool) {
 	// Worker-Facing Publisher
 	zmqXPUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.XPUB))
@@ -144,6 +196,18 @@ func startAsynchronousProxy(resp chan bool) {
 	}
 }
 
+// Starts a worker with the given ID. The worker receives and consumes
+// work from the proxy. It then performs the required event if it recongizes
+// the Task Name/Prefix.
+//
+// Any errors in parsing or working the task is logged.
+//
+// id :: numerical id for logging
+// signalChannel :: channel for control signal for cleanup
+// responseChannel :: an output channel when a signal is received for cleanup
+//
+// The function is contructed to loop forever until signaled otherwise.
+// This function should be run with a goroutine.
 func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan bool) {
 	// Startup
 	subSocket, err := zmq4.NewSocket(zmq4.Type(zmq4.SUB))
@@ -193,21 +257,20 @@ func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan boo
 
 }
 
-func cleanUpTaskQueue() {
-	log.Println("Signalling Task Workers for CleanUp")
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Tasks Communication -- Communicating Tasks and Data to Proxy
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
-	for i := uint8(0); i < NumberOfTaskWorkers; i++ {
-		zeroMQWorkerChannelIn <- true
-	}
-
-	log.Println("Signalling Finished Waiting for response!")
-	for i := uint8(0); i < NumberOfTaskWorkers; i++ {
-		<-zeroMQWorkerChannelOut
-	}
-
-	log.Println("Task Workers Cleanup Complete!")
-}
-
+// Function used by schedule.go to communicate the scheduled tasks to the workers.
+// This takes an array of Task Name/Prefixes+MagicRune+Data strings and sends them
+// to the proxy (which in turn send them to the workers.).
+//
+// msg :: slice of string messages to send to workers (Task Name/Prefix+MagicRune+Data)
+//
+// Returns an Error if communicating fails (server-shutoff or the full message could
+// not be sent).
 func sendTasksToWorkers(msgs []string) error {
 	// Proxy Facing Publisher
 	zmqPUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.PUB))
@@ -244,10 +307,16 @@ func sendTasksToWorkers(msgs []string) error {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Map of Strings to their specific events. The Functions are "work" functions which load the
+// required data to call a function in the event module. These are called and used by workers.
 var mapPrefixToWork map[string]func([]string) error = map[string]func([]string) error{
 	HealthTaskPrefix: healthTaskWork,
 }
 
+// Parses the given message and runs the associated function based on "mapPrefixToWork"
+// Parsing errors are returned as an error.
+//
+// msg :: string message for working (Task Name/Prefix+MagicRune+Data)
 func onTask(msg string) error {
 	log.Println("Got Message! | " + msg)
 	if len(msg) <= 0 {
@@ -266,6 +335,10 @@ func onTask(msg string) error {
 	return work(args)
 }
 
+// Performs the loading required for game garbage collection. It then calls
+// the Game Health Check Event with the proper args.
+//
+// args :: the data from the msg. This should be a
 func healthTaskWork(args []string) error {
 	if len(args) < 1 {
 		return errors.New("Task Did Not Receive Game ID!")
@@ -296,10 +369,12 @@ func healthTaskWork(args []string) error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
-//// Tasks Utility Functions -- Functions that help behind the scenes
+//// Tasks Utility Functions -- Functions that help when creating and submitting tasks
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Constructs a string by joining the prefix and args with magic runes
+// i.e. result = prefix + MagicRune + arg0 + MagicRune + arg1 + [MagicRune + argN] ...
 func constructTaskWithPrefix(prefix string, args []string) string {
 	var builder strings.Builder
 
@@ -313,6 +388,8 @@ func constructTaskWithPrefix(prefix string, args []string) string {
 	return builder.String()
 }
 
+// Parses a Task based on a MagicRune delimited string.
+// Returns the Prefix and the slice of MagicRune Delimited args.
 func parseTask(msg string) (string, []string) {
 	slice := strings.Split(msg, string(MagicRune))
 	return slice[0], slice[1:]
