@@ -8,11 +8,11 @@ import (
 	"log"
 	"os"
 
-	"laplace-entangled-env.com/internal/data"
-	"laplace-entangled-env.com/internal/redis"
-	"laplace-entangled-env.com/internal/route"
-	"laplace-entangled-env.com/internal/schedule"
-	"laplace-entangled-env.com/internal/zeromq"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/data"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/route"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/schedule"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
 )
 
 // A startup function which returns a function to call when exitting/cleaning up. If instead an error is produced

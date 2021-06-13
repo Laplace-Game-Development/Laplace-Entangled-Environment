@@ -1,4 +1,4 @@
-package main // import "laplace-entangled-env.com/cmd"
+package main // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/cmd"
 
 Laplace-Entanglement-Environment Application Package. This represents all
 the modules necessary to run the application. This service provides a

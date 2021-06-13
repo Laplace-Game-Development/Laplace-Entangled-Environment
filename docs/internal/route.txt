@@ -1,4 +1,4 @@
-package route // import "laplace-entangled-env.com/internal/route"
+package route // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/route"
 
 Route Represents the routing and listening to connections. This module takes
 care of the communication links to users and clients. They will forward

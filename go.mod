@@ -1,4 +1,4 @@
-module laplace-entangled-env.com
+module github.com/Laplace-Game-Development/Laplace-Entangled-Environment
 
 go 1.15
 

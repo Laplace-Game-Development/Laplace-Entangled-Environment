@@ -1,4 +1,4 @@
-package schedule // import "laplace-entangled-env.com/internal/schedule"
+package schedule // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/schedule"
 
 The schedule package takes care of any "scheduled tasks". Using a
 combination of Cron and ZeroMQ, the schedule package distributes the

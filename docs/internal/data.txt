@@ -1,4 +1,4 @@
-package data // import "laplace-entangled-env.com/internal/data"
+package data // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/data"
 
 
 CONSTANTS

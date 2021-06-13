@@ -1,4 +1,4 @@
-package event // import "laplace-entangled-env.com/internal/event"
+package event // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
 
 The Event module represents the possible tasks a command can submit to be
 done outside of the request response loop. This majorly includes garbage
