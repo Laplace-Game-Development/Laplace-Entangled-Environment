@@ -33,6 +33,7 @@ const AuthIDAtomicCounter string = "authIDAtomicCounter"
 // Redis Key for the Username to UserID HashMap
 const UserAuthIDTable string = "userToAuthID"
 
+//
 // User Table
 
 // Redis HashTable Key Prefix for User IDs. Concatenated
@@ -51,6 +52,7 @@ const AuthIDSetTokenStaleDateTimeField string = "stale"
 // Token Use Counter Key/Field for Redis UserID HashTable
 const AuthIDSetTokenUseCounter string = "tokenUses"
 
+//
 // Encryption Configurables
 
 // TLS Certificate File Location from root of the project
@@ -59,6 +61,7 @@ const CrtLocation string = "./tlscert.crt"
 // TLS Key File Location from root of the project
 const KeyLocation string = "./tlskey.key"
 
+//
 // Token Configurables
 
 // Length of Characters For Secret User Authentication Token
@@ -72,6 +75,19 @@ const TokenStaleTime time.Duration = time.Minute * 5
 // from a user. Useful for papertrails.
 const SuperUserID string = "-1"
 
+//
+// Register/Login Configurables
+
+// Redis Key Password Hashing Salt
+const passHashSaltKey string = "PasswordSalt"
+
+// Number of bytes (not characters) for random salt.
+const passHashSaltLen int = 128
+
+// Password Hashing Salt
+var passHashSalt string = ""
+
+//
 // Listener Secure Configurables
 
 // TLS Configuration for HTTPS Server and SSL with TCP
@@ -121,6 +137,21 @@ func StartEncryption() (func(), error) {
 	tlsConfig = tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS13,
+	}
+
+	var passHashSaltTemp string
+	err = redis.MasterRedis.Do(radix.Cmd(&passHashSaltTemp, "GET", passHashSaltKey))
+	if err != nil {
+		return nil, err
+	} else if passHashSaltTemp == "" {
+		byteTemp := make([]byte, passHashSaltLen)
+		n, err := rand.Read(byteTemp)
+		if err != nil || n < 128 {
+			return nil, err
+		}
+
+		passHashSalt = string(byteTemp)
+		redis.MasterRedis.Do(radix.Cmd(nil, "SET", passHashSaltKey, passHashSalt))
 	}
 
 	return cleanUpEncryption, nil
@@ -237,7 +268,7 @@ func CreateAccount(username string, password string) (bool, error) {
 
 	var newID int
 	var success int
-	checksum := sha512.Sum512([]byte(password))
+	checksum := sha512.Sum512([]byte(passHashSalt + password))
 	checksumHex := hex.EncodeToString(checksum[:])
 	castedName := string(username)
 
@@ -321,7 +352,7 @@ func IsValidLogin(username string, password string) bool {
 	}
 
 	var actualChecksumHex string
-	reqChecksum := sha512.Sum512([]byte(password))
+	reqChecksum := sha512.Sum512([]byte(passHashSalt + password))
 	reqChecksumHex := hex.EncodeToString(reqChecksum[:])
 	castedName := string(username)
 

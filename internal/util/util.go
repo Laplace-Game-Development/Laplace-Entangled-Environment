@@ -17,7 +17,7 @@ func Clear(data *[]byte) {
 }
 
 // Creates a JSON representing an object with an "error" field. The str parameter
-// represents the definition or value for said field. The byte slice represents 
+// represents the definition or value for said field. The byte slice represents
 // the "string" version of the JSON.
 func NewErrorJson(str string) []byte {
 	return []byte("{\"error\": \"" + str + "\"}")
@@ -31,40 +31,49 @@ func NewErrorJson(str string) []byte {
 // Return    :: slice representing the bytes from the start and including the seperator (this may be a bug)
 //     it will return a nil slice otherwise. This is paired with the length of the slice (or 0 for nil)
 //
-// This was useful for the original schema of authentication. I wanted to parse the information from a 
+// This was useful for the original schema of authentication. I wanted to parse the information from a
 // tilde (~) delimited string. This function may prove useful later.
 func StrTokWithEscape(seperator *[]byte, escape *[]byte, str *[]byte, start uint) ([]byte, uint) {
 	matchesSepIndex := 0
 	sepLength := len(*seperator)
+	sepLengthSubOne := sepLength - 1
 	matchesEscIndex := 0
 	escLength := len(*escape)
+	escLengthSubOne := escLength - 1
 	end := uint(len(*str))
 	var cur byte
 
-	for strIndex := start; strIndex <= end; strIndex += 1 {
+	if start >= end {
+		return nil, end
+	} else if sepLength <= 0 {
+		return (*str)[start:end], end
+	}
+
+	for strIndex := start; strIndex < end; strIndex += 1 {
 		cur = (*str)[strIndex]
-		if cur == (*escape)[matchesEscIndex] {
+		if escLength > 0 && cur == (*escape)[matchesEscIndex] {
 			matchesEscIndex += 1
-			if matchesEscIndex >= escLength {
+			if matchesEscIndex >= escLengthSubOne {
 				matchesEscIndex = 0
 				matchesSepIndex = 0
+				strIndex += 1 // Skip the next character
 				continue
 			}
 		}
 
-		if cur == (*seperator)[matchesEscIndex] {
+		if cur == (*seperator)[matchesSepIndex] {
 			matchesSepIndex += 1
-			if matchesSepIndex >= sepLength {
+			if matchesSepIndex >= sepLengthSubOne {
 				return (*str)[start : strIndex+1], strIndex + 1
 			}
 		}
 	}
 
-	return nil, 0
+	return (*str)[start:end], end
 }
 
 // Concatenates the input slice to index outputStart of the output slice.
-// This means that output[outputStart:outputStart + len(input)] will be 
+// This means that output[outputStart:outputStart + len(input)] will be
 // overwritten with the value of input. In addition, if output cannot store
 // bytes up to that last index, an error will be returned.
 func Concat(output *[]byte, input *[]byte, outputStart int) error {
