@@ -1,3 +1,11 @@
+// Route Represents the routing and listening to connections.
+// This module takes care of the communication links to users
+// and clients. They will forward commands to data driven modules
+// in `/data`. The Listener module makes sure to listen to
+// connections over TCP and HTTP (maybe Websocket too later.)
+// We also have the parser which uses the policy directives to
+// break apart the user payloads into understandable commands.
+// Secure takes care of any encryption necessary over the wire.
 package route
 
 import (
@@ -14,39 +22,59 @@ import (
 	"laplace-entangled-env.com/internal/util"
 )
 
-// Handler Constants
+//// Configurables
 
 // Time for shutdown. Quitting Mid Handle is really bad. This should be longer than any duration
 const ShutdownDuration time.Duration = 10 * time.Second
 
-// Client TCP Settings
+/* Client TCP Settings */
+
+// Time spent waiting for incomming connections before checking for control signals/shutoff/etc
 const IoDeadline time.Duration = 5 * time.Millisecond
-const ListeningTCPIpAddress string = ""
-const ListeningTCPPortNumber string = "26005"
+
+// TCP IP Mask to listen for connections on
+const ListeningTCPIpAddress string = "127.0.0.1"
+
+// TCP Port number to listen for connections on
+const ListeningTCPPortNumber string = ":26005"
+
+// Size of Packet Header for TCP commands
+// Byte 1 :: Metadata/Parsing info
+// Byte 2 :: More Significant byte for Command
+// Byte 3 :: Lesser Significant byte for Command
 const CommandBytes = 3
 
+// Limit of Goroutines used for listening on TCP.
 // 5 is a good number for testing, but a better number would be much higher.
 const NumberOfTCPThreads = 5
 
-// These should not change during runtime
+// Constant byte string of JSON representing a data malformed error
+// May be moved to Policy
 var MalformedDataMsg []byte = []byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}")
+
+// Constant integer length of a JSON byte string representing a data malformed error
+// May be moved to Policy
 var MalformedDataMsgLen int = len([]byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}"))
 
-// Command Logic Settings
-const CreateGameAuthSliceLow = 2
-const CreateGameAuthSliceHigh = 10
-
-// HTTP Configurations
+// HTTP Listening Host IP
 const HttpHost string = "127.0.0.1"
+
+// HTTP Host Listening Port Number
 const HttpPort string = ":8080"
 
 //// Global Variables | Singletons
 
+// Thread Pool for Connection Listening. This stores the threads and context
+// for all listening for connections.
+// The goroutines themselves will spawn other goroutines so we use more than
+// 3 "threads" for the full application.
+//
 // 1 for TCP
 // 1 For HTTP
-// 1 For WebSocket
+// 1 For WebSocket?
 var listenerThreadPool util.ThreadPool = util.NewThreadPool(3)
 
+// ServerTask Startup Function for Conneciton Listening. Takes care of initialization.
 func StartListener() (func(), error) {
 	err := listenerThreadPool.SubmitFuncUnsafe(startTCPListening)
 	if err != nil {
@@ -61,6 +89,9 @@ func StartListener() (func(), error) {
 	return cleanUpListener, nil
 }
 
+// CleanUp Function returned by Startup function. Stops all listeners by "Finish"ing the
+// threadpool. This means that within the given "ShutdownDuration" the listeners should
+// be closed.
 func cleanUpListener() {
 	log.Println("Cleaning Up Listener Logic")
 	listenerThreadPool.Finish(time.Now().Add(ShutdownDuration))
@@ -72,6 +103,17 @@ func cleanUpListener() {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// takes the required parameters and ensures any listener that is ready to send their command
+// to data has the required components. This will parse and perform the commmand requested. It
+// will then return the calculated byte slice response.
+//
+// requestHeader :: Common Fields for all requests including authentication and endpoint selection
+// bodyFactories :: Arguments for the commands in the form of first order functions
+// isSecured     :: Whether the request came over an encrypted connection (i.e. SSL/SSH/HTTPS)
+//
+// returns []byte :: byte slice response for user
+//          error :: non-nil when an invalid command is sent or an error occurred when processing
+//             typically means request was rejected.
 func calculateResponse(requestHeader policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecured bool) ([]byte, error) {
 	// parse.go
 	return switchOnCommand(requestHeader, bodyFactories, isSecured)
@@ -83,6 +125,9 @@ func calculateResponse(requestHeader policy.RequestHeader, bodyFactories policy.
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// A Constant map of what commands should be made with a POST HTTP Request
+// rather than a GET Request. This is for semantic and API design reasons.
+//
 // This should never change during runtime!
 var postOnlyCmdMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
 	policy.CmdError:      false,
@@ -98,11 +143,10 @@ var postOnlyCmdMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
 	policy.CmdGameDelete: true,
 }
 
-type UserSigTuple struct {
-	UserID    string
-	Signature string
-}
-
+// Attaches Path Handlers for HTTP Web Server. Uses Paths to
+// communicate command used. i.e. /user/ -> CmdGetUser
+//
+// ctx :: Owning Context for HTTP Listener
 func startHTTPListening(ctx context.Context) {
 	http.HandleFunc("/empty/", getHttpHandler(policy.CmdEmpty))
 	http.HandleFunc("/error/", getHttpHandler(policy.CmdError))
@@ -131,12 +175,20 @@ func startHTTPListening(ctx context.Context) {
 	}
 }
 
+// Creates a First Order Function for the given command.
+// Useful for when adding handlers in the initialization function
+// for HTTP.
 func getHttpHandler(command policy.ClientCmd) func(writer http.ResponseWriter, req *http.Request) {
 	return func(writer http.ResponseWriter, req *http.Request) {
 		handleHttp(command, writer, req)
 	}
 }
 
+// Handles a given HTTP request with the given Client Command (endpoint), and data
+//
+// clientCmd :: Selected Endpoint/Command
+// writer    :: writer to be written to with response data for user
+// req       :: Given HTTP Request with associated non-command data (args and authentication)
 func handleHttp(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *http.Request) {
 	if checkPost(clientCmd, writer, req) {
 		return
@@ -147,12 +199,12 @@ func handleHttp(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *htt
 		log.Printf("Error Reading Body: %v\n", err)
 	}
 
-	userID, sig := parseHeaderInfo(req, &body)
+	requestAttachment := parseHeaderInfo(req, &body)
 
 	requestHeader := policy.RequestHeader{
 		Command: clientCmd,
-		UserID:  userID,
-		Sig:     sig,
+		UserID:  requestAttachment.UserID,
+		Sig:     requestAttachment.Sig,
 	}
 
 	bodyFactories := policy.RequestBodyFactories{
@@ -167,6 +219,15 @@ func handleHttp(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *htt
 	calculateResponse(requestHeader, bodyFactories, req.TLS != nil)
 }
 
+// Returns whether the given HTTP request is a POST request if needed.
+// see "postOnlyCmdMap"
+//
+// clientCmd :: Selected Endpoint/Command
+// writer    :: writer to be written to with response data for user
+// req       :: Given HTTP Request with associated non-command data (args and authentication)
+// returns   -> bool
+//              true  | continue processing the request
+//              false | ignore the request. An error was already given to the user
 func checkPost(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *http.Request) bool {
 	needsPost, exists := postOnlyCmdMap[clientCmd]
 	if exists && needsPost && req.Method != http.MethodPost {
@@ -183,10 +244,19 @@ func checkPost(clientCmd policy.ClientCmd, writer http.ResponseWriter, req *http
 	return false
 }
 
-func parseHeaderInfo(req *http.Request, body *[]byte) (string, string) {
-	userID := ""
+// Creates the Request Attachment (Authentication Portion) of the request
+//
+// req :: HTTP Request with associated data
+// body :: slice of data representing the request body. We use a parameter
+//    rather than grabbing it all to optimize the process. It needs to be
+//    used by other functions, so passing it in is better than creating
+//    a variable just to be garbage collected
+//
+// returns -> policy.RequestAttachment :: the authentication components found
+//        or empty components if none are found in header/cookies/or body
+func parseHeaderInfo(req *http.Request, body *[]byte) policy.RequestAttachment {
+	requestAttachment := policy.RequestAttachment{}
 	userIDFound := false
-	sig := ""
 	sigFound := false
 
 	possibleUserIDs := make([]string, 3)
@@ -213,12 +283,12 @@ func parseHeaderInfo(req *http.Request, body *[]byte) (string, string) {
 
 	// Check Body
 	if req.Body != nil {
-		userSigObj := UserSigTuple{}
+		userSigObj := policy.RequestAttachment{}
 
 		err := json.Unmarshal(*body, &userSigObj)
 		if err == nil {
 			possibleUserIDs[2] = userSigObj.UserID
-			possibleSigs[2] = userSigObj.Signature
+			possibleSigs[2] = userSigObj.Sig
 		} else {
 			log.Println("Illformatted JSON sent to HTTP Header")
 		}
@@ -226,17 +296,17 @@ func parseHeaderInfo(req *http.Request, body *[]byte) (string, string) {
 
 	for i := 0; !userIDFound && !sigFound && i < 3; i++ {
 		if !userIDFound && len(possibleUserIDs[i]) > 0 {
-			userID = possibleUserIDs[i]
+			requestAttachment.UserID = possibleUserIDs[i]
 			userIDFound = true
 		}
 
 		if !sigFound && len(possibleSigs[i]) > 0 {
-			sig = possibleSigs[i]
+			requestAttachment.Sig = possibleSigs[i]
 			sigFound = true
 		}
 	}
 
-	return userID, sig
+	return requestAttachment
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -245,20 +315,30 @@ func parseHeaderInfo(req *http.Request, body *[]byte) (string, string) {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Wrapper Structure with boolean fields for a TCP Connection.
+// used to easily differentiate between secure and insecure
+// connections. It also helps in deciding if the TCP connection
+// needs to parse more requests (HTTP requests close connections
+// after one requests, but TCP connections do not.)
 type TCPClientConn struct {
 	conn         net.Conn
 	isSecured    bool
 	isReadNeeded bool
 }
 
-// First byte of a request.
+// First byte of a TCP request. This is a struct of booleans
+// about how the request is structured over TCP.
 type TCPRequestPrefix struct {
-	NeedsSecurity bool // First Most Sig Bit (rest of the bits are ignored)
+	NeedsSecurity bool // First Most Sig Bit
 	IsBase64Enc   bool // Second Most Sig Bit
 	IsJSON        bool // Third Most Sig Bit
 }
 
-// TCP Entrypoint
+// Creates TCP Connection Listener(s) with a designated threadpool and addressing.
+// It submits goroutine each time it finds a connection. If no goroutine is available
+// in the threadpool the listener blocks until one is found.
+//
+// ctx :: Owning Context
 func startTCPListening(ctx context.Context) {
 	log.Println("TCP Listening on " + ListeningTCPIpAddress + ListeningTCPPortNumber + "!")
 	ln, err := net.Listen("tcp", ListeningTCPIpAddress+":"+ListeningTCPPortNumber)
@@ -288,7 +368,12 @@ func startTCPListening(ctx context.Context) {
 	}
 }
 
-// TCP Coroutine Entry
+// TCP goroutine function, using the prepackaged information to serve the
+// connected client. It parses the data it receives to compile a response.
+// Function will loop until the connection is closed.
+//
+// ctx :: Owning Context
+// clientConn :: Metadata and reference to TCP Connection
 func handleTCPConnection(ctx context.Context, clientConn TCPClientConn) {
 	log.Println("New Connection!")
 	// Set Timeout
@@ -328,6 +413,14 @@ func handleTCPConnection(ctx context.Context, clientConn TCPClientConn) {
 }
 
 // Read and Gather Byte Response for a TCP Client Connection
+//
+// clientConn :: Metadata and reference to TCP Connection
+// dataIn     :: byte slice data read in for
+//      Command, Args, Authentication, etc.
+//
+// returns -> bool
+//            true | command was successful
+//           false | command was unsuccessful
 func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool {
 	n, err := clientConn.conn.Read(*dataIn)
 	if err != nil {
@@ -371,8 +464,14 @@ func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool {
 	return true
 }
 
-// Gather TCP Prefix
-// Prefix is the first Byte of a TCP Request
+// Gather TCP Prefix.
+// Prefix is the first Byte of a TCP Request.
+// It instructs us how the data is structured.
+//
+// length :: number of bytes in data
+// data   :: payload/data for request i.e. Command, Auth, and Args
+//
+// returns -> TCPRequestPrefix :: Boolean struct for Structuring metadata
 func parseTCPPrefix(length int, data *[]byte) (TCPRequestPrefix, error) {
 	if length < 1 {
 		return TCPRequestPrefix{}, errors.New("Packet Has No Prefix")
@@ -389,6 +488,20 @@ func parseTCPPrefix(length int, data *[]byte) (TCPRequestPrefix, error) {
 	return prefix, nil
 }
 
+// Using the structuring metadata
+// and the rest of the payload data, the function generates
+// a request to the server and returns the information
+// needed to "calculateResponse"
+//
+// length :: number of bytes in data
+// data   :: payload/data for request i.e. Command, Auth, and Args
+// prefix :: Structuring Metadata
+//
+// returns {
+//	    RequestHeader :: header data used for all request (Command and Authentication)
+//      RequestBodyFactories ::	Transform functions for getting request arguments
+//      error :: If parsing goes wrong and the request is illformed an error is returned
+// }
 func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (policy.RequestHeader, policy.RequestBodyFactories, error) {
 	header := policy.RequestHeader{}
 	factories := policy.RequestBodyFactories{}
@@ -427,11 +540,24 @@ func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (
 }
 
 // After successful Read->Response should we continue communications?
+//
+// clientConn :: Metadata and reference to TCP Connection
+//
+// returns -> bool
+//            true | keep the connection alive
+//           false | close the connection
 func computeTCPKeepAlive(clientConn TCPClientConn) bool {
 	// Add Logic for Connection Overhead
 	return clientConn.isReadNeeded
 }
 
+// Write byte slice to client
+//
+// clientConn :: Metadata and reference to TCP Connection
+// response   :: byte slice of what needs to be sent to client
+// length     :: number of bytes in byte slice
+//
+// returns -> error if an error occurs and nil otherwise.
 func writeTCPResponse(clientConn TCPClientConn, response *[]byte, length int) error {
 	numSent := 0
 

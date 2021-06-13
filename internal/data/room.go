@@ -14,24 +14,58 @@ import (
 	"laplace-entangled-env.com/internal/redis"
 )
 
+//// Configurables
+
 // Table / Datastructure Names
+
+// Redis Key For Game List
 const GameListName string = "gameList"
+
+// Redis Key for Game Set
 const GameHashSetName string = "gameHash"
+
+// Redis Key for Owner Set
 const OwnerHashSetName string = "ownerMapGame"
+
+// Redis Key Prefix for Player Roster Sets
 const PlayerSetPrefix string = "roster:"
+
+// Redis Key for Game ID Counter
 const GameAtomicCounter string = "gameCountInteger"
+
+// Redis Key for Empty Set
+// useful for ease of group deletions
 const EmptyName string = "empty"
 
 // Metadata Table
+
+// Redis Key Prefix for Game Metadata Hashmaps
 const MetadataSetPrefix string = "metadataHash:"
+
+// Redis Field/Key for Game Metadata Owner
 const MetadataSetOwner string = "owner"
+
+// Redis Field/Key for Game Metadata Creation DateTime
+//    (number of milliseconds since epoch)
 const MetadataSetCreatedAt string = "createdAt"
+
+// Redis Field/Key for Game Metadata Last Used DateTime
+//    (number of milliseconds since epoch)
 const MetadataSetLastUsed string = "lastUsed"
 
-// Other Constants
+// Game Throttling
+
+// The Maximum Number of Games If
+// ThrottleGames is true
 const NumberOfGames = 20
+
+// Whether to Throttle to the Maximum
+// Number of Games or Not
 const ThrottleGames = false
 
+// ServerTask Startup Function for Game Rooms. Takes care of initialization.
+// Sets Atomic Counter for GameIDs. Error is returned if the Database
+// can't be reached.
 func StartRoomsSystem() (func(), error) {
 	err := redis.MasterRedis.Do(radix.Cmd(nil, "SETNX", GameAtomicCounter, "0"))
 	if err != nil {
@@ -41,6 +75,8 @@ func StartRoomsSystem() (func(), error) {
 	return cleanUpRoomSystem, nil
 }
 
+// CleanUp Function returned by Startup function. Doesn't do anything, but here
+// for consistency.
 func cleanUpRoomSystem() {
 	log.Println("Cleaning Up Room Logic")
 }
@@ -51,12 +87,14 @@ func cleanUpRoomSystem() {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// JSON Fields for the Join Game Command
 type GameWelcomeData struct {
 	Id         string
 	NumPlayers uint16 `json:",string"`
 	Data       string
 }
 
+// JSON Fields for the Create Game Command
 // For Static game details
 type GameMetadata struct {
 	Id        string
@@ -65,11 +103,14 @@ type GameMetadata struct {
 	LastUsed  int64 `json:",string"`
 }
 
-// Used for Join Game, Leave Game
+// Unmarshal Structure for Joining/Finding Games
 type SelectGameArgs struct {
 	GameID string
 }
 
+// Create Game Endpoint to add a Game and new Game Data to the
+// the database. Each player can only own/create one game. They
+// may delete and create games freely.
 func CreateGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	err := bodyFactories.SigVerify(header.UserID, header.Sig)
 	if err != nil {
@@ -159,6 +200,8 @@ func CanCreateGame(authID string) (bool, error) {
 	return success != 0, nil
 }
 
+// Join Game Endpoint adds the player to the roster of an existing
+// game. This means they can "applyActions" to the game (see game.go)
 func JoinGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	err := bodyFactories.SigVerify(header.UserID, header.Sig)
 	if err != nil {
@@ -202,6 +245,8 @@ func JoinGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFacto
 	}
 }
 
+// Leave Game Endpoint removes the player from the roster of an existing
+// game. This means they can no longer "applyActions" to the game (see game.go)
 func LeaveGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	err := bodyFactories.SigVerify(header.UserID, header.Sig)
 	if err != nil {
@@ -238,6 +283,8 @@ func LeaveGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFact
 	return policy.SuccessfulResponse()
 }
 
+// An Owner may delete their game at any time. This means the game
+// metadata and state will be removed from the database.
 func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	err := bodyFactories.SigVerify(header.UserID, header.Sig)
 	if err != nil {
@@ -279,6 +326,14 @@ func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 	return policy.SuccessfulResponse()
 }
 
+// Returns the time in which the last recorded action was taken
+// for a game. This loads the value from the Redis
+// database.
+//
+// gameID :: Unique Identifier for game in string form
+//
+// returns -> time.Time :: time last action was made
+//         -> error     :: non-nil if unable to read game metadata
 func GetRoomHealth(gameID string) (time.Time, error) {
 	var lastUpdate string
 
@@ -294,6 +349,13 @@ func GetRoomHealth(gameID string) (time.Time, error) {
 	return time.Unix(milli, 0), nil
 }
 
+// Returns whether a user is in a game's roster (see JoinGame and leaveGame).
+//
+// userID :: Unique Identifier for a user
+// gameID :: Unique Identifier for game in string form
+//
+// returns -> bool  :: true if the user is in the roster, false otherwise
+//         -> error :: non-nil if unable to read game metadata
 func IsUserInGame(userID string, gameID string) (bool, error) {
 	var isInGame int
 	err := redis.MasterRedis.Do(radix.Cmd(&isInGame, "SISMEMBER", PlayerSetPrefix+gameID, userID))
@@ -310,7 +372,9 @@ func IsUserInGame(userID string, gameID string) (bool, error) {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Provides a 12 Character ID from any given 64 bit Integer
+// Provides a 12 character string ID from any given 64 bit Integer
+// The ID uses the characters 0-9 and a-z
+// This is used for GameIDs
 func StringIDFromNumbers(counter int64) string {
 	res := make([]byte, 13)
 	var seg int64 = 0
@@ -330,6 +394,10 @@ func StringIDFromNumbers(counter int64) string {
 	return string(res)
 }
 
+// Utility Function for changing Game Metadata with Redis
+//
+// metadata :: New Metadata Value
+//    (overwrites the id at metadata.id)
 func SetGameMetadata(metadata GameMetadata) error {
 	return redis.MasterRedis.Do(radix.Cmd(nil, "HSET", MetadataSetPrefix+metadata.Id,
 		MetadataSetOwner, metadata.Owner,
@@ -337,6 +405,9 @@ func SetGameMetadata(metadata GameMetadata) error {
 		MetadataSetLastUsed, fmt.Sprintf("%d", metadata.LastUsed)))
 }
 
+// Utility Function for selecting the game Metadata from redis
+//
+// gameID :: string unique identifier for game.
 func GetGameMetadata(gameID string) (GameMetadata, error) {
 	fields := make([]string, 3)
 

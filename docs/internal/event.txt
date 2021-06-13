@@ -1,0 +1,24 @@
+package event // import "laplace-entangled-env.com/internal/event"
+
+The Event module represents the possible tasks a command can submit to be
+done outside of the request response loop. This majorly includes garbage
+collecting for old/unused games.
+
+CONSTANTS
+
+const HealthTaskQueue string = "healthTaskQueue"
+    Name of Redis Key Storing the Health Tasks
+
+
+FUNCTIONS
+
+func SubmitGameForHealthCheck(gameID string) error
+    Submits a perspective game ID to be added to the Game Health Check scheduled
+    tasks in redis.
+
+    gameID :: string gameID as the unique identifier in the games Hash Tables in
+    Redis.
+
+    returns -> error if we are unable to submit the id to the database. nil
+    otherwise.
+

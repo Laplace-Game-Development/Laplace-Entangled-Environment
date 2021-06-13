@@ -1,3 +1,9 @@
+// Policy is the type definitions and decoupling pattern for route and data.
+// routes listen and inquire for commands to send to data
+// data then sends back the responses for routes to use
+// the format of communication between these modules is described here.
+// It helps to define the structures used in requests and responses so
+// the functions can be used internall (like with schedule)
 package policy
 
 import (
@@ -5,7 +11,10 @@ import (
 	"time"
 )
 
-// Configurables
+////  Configurables
+
+// The amount of time a game can go without an action for. If nothing occurs
+// for x time on a game then it should be deleted
 const StaleGameDuration time.Duration = time.Duration(time.Minute * 5)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -16,11 +25,15 @@ const StaleGameDuration time.Duration = time.Duration(time.Minute * 5)
 
 //// Incomming Request Definitions
 
-// 2nd and 3rd bytes of a TCP Request
 // Establish which endpoint/action the request is for
+//
+// Typically the 2nd and 3rd bytes of a TCP Request
 type ClientCmd int64
 
+// TCP Request Attachment
 // JSON or ASN1 Attachment for Authentication and Regulation
+//
+// Parsed Into Request Header
 type RequestAttachment struct {
 	// Who the Command is From
 	UserID string
@@ -30,6 +43,11 @@ type RequestAttachment struct {
 }
 
 //// Private Request Definitions For Parsing
+
+// The Request Header represents the metadata for requests that
+// all requests need. This represents the selected endpoint and
+// authentication data needed for some commands (these values)
+// may be empty for public commands.
 type RequestHeader struct {
 	// Command To Be Handled (i.e. Sent in TCP Prefix)
 	Command ClientCmd
@@ -41,6 +59,11 @@ type RequestHeader struct {
 	Sig string
 }
 
+// The Request Body Represents the data for the command. Since
+// each command has different arguments (and using byte slices
+// can only go so far) we use factory functions to gather all
+// the required data. (I use Factories here but they are more
+// defered Transformation/Map Functions).
 type RequestBodyFactories struct {
 	// Interface Parameter should be a pointer
 	ParseFactory func(ptr interface{}) error
@@ -55,6 +78,14 @@ type RequestBodyFactories struct {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Abstracted Response Information from a Command
+//
+// The Command Response is a structure that with certain
+// values filled is communicable back to the route/listner
+// module functions to then transform back into
+// packets/bytes/http whatever.
+//
+// While you are perfectly allowed to define these on your own
+// there are premade functions below for common responses.
 type CommandResponse struct {
 	// Data to be Digested
 	Data interface{}
@@ -72,8 +103,12 @@ type CommandResponse struct {
 	ServerError error
 }
 
-// Data Interface for CommandResponse Example.
-// Very typical for non-reading commands
+// Data Interface for JSON parsing. Isn't really used
+// to communicate within the Application, but makes
+// creating the Json with golangs Json package easier.
+//
+// The Struct has to be public so the package can parse,
+// but refrain from using in parameters/return types etc.
 type SuccessfulData struct {
 	Successful bool
 	Err        string
@@ -86,6 +121,9 @@ type SuccessfulData struct {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /* Commands will be 2 byte codes */
+
+// Enum Consisting of all the ClientCommands.
+// The comments also map what each command should map to in TCP
 const (
 	CmdError ClientCmd = iota
 	//                   //=====================
@@ -122,10 +160,22 @@ const (
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Reject the request and tell the user to come back tomorrow...
+//    there are server issues today
+//
+// err : Error received from doing something
+//   (something that contains a string to be logged)
 func RespWithError(err error) CommandResponse {
 	return CommandResponse{ServerError: err}
 }
 
+// Reject the request by telling the user what they did wrong...
+// "Sorry Hacker but our server doesn't work like that"
+// ...
+// Maybe something a bit nicer...
+//
+// err : Error received from doing something
+//   (something that contains a string to be sent to the user)
 func UnSuccessfulResponseError(err error) CommandResponse {
 	return CommandResponse{
 		Data:   SuccessfulData{false, err.Error()},
@@ -133,6 +183,12 @@ func UnSuccessfulResponseError(err error) CommandResponse {
 	}
 }
 
+// Reject the request by telling the user what they did wrong...
+// "Sorry Hacker but our server doesn't work like that"
+// ...
+// Maybe something a bit nicer...
+//
+// err : a string to be sent to the user
 func UnSuccessfulResponse(err string) CommandResponse {
 	return CommandResponse{
 		Data:   SuccessfulData{false, err},
@@ -140,6 +196,7 @@ func UnSuccessfulResponse(err string) CommandResponse {
 	}
 }
 
+// Accept the request and respond with the mystical "Successful: true"
 func SuccessfulResponse() CommandResponse {
 	return CommandResponse{
 		Data:   SuccessfulData{Successful: true},
@@ -147,6 +204,9 @@ func SuccessfulResponse() CommandResponse {
 	}
 }
 
+// Send bytes back to the user
+//
+// msg :: byte slice of what you want to be sent back
 func RawSuccessfulResponseBytes(msg *[]byte) CommandResponse {
 	return CommandResponse{
 		UseRaw: true,
@@ -154,7 +214,11 @@ func RawSuccessfulResponseBytes(msg *[]byte) CommandResponse {
 	}
 }
 
-// msg should not be a constant string!
+// Send bytes back to the user
+//
+// msg :: string of what you want to be sent back
+//
+// WARNING: msg should not be a constant string!
 func RawSuccessfulResponse(msg string) CommandResponse {
 	return CommandResponse{
 		UseRaw: true,
@@ -162,6 +226,13 @@ func RawSuccessfulResponse(msg string) CommandResponse {
 	}
 }
 
+// Send bytes back to the user
+//
+// msg :: string of what you want to be sent back
+//
+// WARNING: msg should not be a constant string!
+// No different from RawSuccessfulResponse, but we may
+// change that in the future.
 func RawUnsuccessfulResponse(err string) CommandResponse {
 	return CommandResponse{
 		UseRaw: true,

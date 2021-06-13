@@ -67,7 +67,9 @@ func testAtomicCounter(t *testing.T) {
 
 	for i := 0; i < AtomicTestIterations; i++ {
 		err = MasterRedis.Do(radix.Cmd(&counterNext, "INCR", AtomicTestKey))
-		if counterNext <= counter || (counter == (^0) && counterNext == 0) {
+		if err != nil {
+			t.Errorf("Could Not Increment Key %s. Err: %v\n", AtomicTestKey, err)
+		} else if counterNext <= counter || (counter == (^0) && counterNext == 0) {
 			t.Errorf("Result was less than or equal to previous increment\n")
 		}
 	}

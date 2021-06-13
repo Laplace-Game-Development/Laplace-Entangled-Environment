@@ -1,0 +1,227 @@
+package data // import "laplace-entangled-env.com/internal/data"
+
+
+CONSTANTS
+
+const CommandToExec string = "node"
+    Shell Command to execute
+
+const EmptyName string = "empty"
+    Redis Key for Empty Set useful for ease of group deletions
+
+const GameAtomicCounter string = "gameCountInteger"
+    Redis Key for Game ID Counter
+
+const GameHashSetName string = "gameHash"
+    Redis Key for Game Set
+
+const GameListName string = "gameList"
+    Redis Key For Game List
+
+const GamePort string = ":" + GamePortNum
+    Game Port Number (prefixed with colon)
+
+const GamePortNum string = "5011"
+    Game Port Number
+
+const MetadataSetCreatedAt string = "createdAt"
+    Redis Field/Key for Game Metadata Creation DateTime
+
+        (number of milliseconds since epoch)
+
+const MetadataSetLastUsed string = "lastUsed"
+    Redis Field/Key for Game Metadata Last Used DateTime
+
+        (number of milliseconds since epoch)
+
+const MetadataSetOwner string = "owner"
+    Redis Field/Key for Game Metadata Owner
+
+const MetadataSetPrefix string = "metadataHash:"
+    Redis Key Prefix for Game Metadata Hashmaps
+
+const NumberOfGames = 20
+    The Maximum Number of Games If ThrottleGames is true
+
+const OwnerHashSetName string = "ownerMapGame"
+    Redis Key for Owner Set
+
+const PlayerSetPrefix string = "roster:"
+    Redis Key Prefix for Player Roster Sets
+
+const ThrottleGames = false
+    Whether to Throttle to the Maximum Number of Games or Not
+
+const WaitDurationForGameAction time.Duration = 3 * time.Second
+    Time to Wait For Game to Respond to an Action
+
+const WaitDurationForGameStop time.Duration = 10 * time.Second
+    Time to wait for Game to Finish cleaning up
+
+
+VARIABLES
+
+var CommandArgs []string = []string{"./node-layer/index.js", "--binding=" + GamePortNum}
+    Shell Command Args This value should not change at runtime
+
+var cancelFunc func() = nil
+    Context Cancel Function
+
+var commandContext context.Context = nil
+    Game Context (start stop signals)
+
+
+FUNCTIONS
+
+func ApplyAction(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    The Apply Action Endpoint sends the payload to the game. This will be the
+    most highly used endpoint as this represents the main transport method to
+    games. The Game actually runs the code, but the application loads the data
+    for the game from the database.
+
+func BytesFromGame(req *zmq4.Socket) (string, error)
+    Receive a string of bytes from the game.(This is used with BytesToGame and
+    there should not be a need to call this function)
+
+    req :: ZeroMQ Request Socket
+
+    returns -> string :: response from third-party game
+
+        -> error :: non-nil if it couldn't receive
+               data from game
+
+func BytesToGame(dataIn string) (string, error)
+    Send a string of bytes to the third party application using ZeroMQ (The Game
+    SDK will take care of setting up the "server" part of communication. We just
+    connect and send a string, waiting for a a response). Thread Safe with
+    ZeroMQ!
+
+    dataIn :: string to sent to game (usually a JSON.)
+
+    returns -> string :: response from third-party game
+
+        -> error :: non-nil if it couldn't send data
+               to the game.
+
+func CanCreateGame(authID string) (bool, error)
+func CreateGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    Create Game Endpoint to add a Game and new Game Data to the the database.
+    Each player can only own/create one game. They may delete and create games
+    freely.
+
+func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    An Owner may delete their game at any time. This means the game metadata and
+    state will be removed from the database.
+
+func GetGameData(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    The Get Game Data Endpoint gathers all the data in the database for a game.
+    The Games are public by default so anyone should be able to observe
+
+    However, observers cannot change the game in any way. You have to be on the
+    roster to apply an action
+
+func GetRoomHealth(gameID string) (time.Time, error)
+    Returns the time in which the last recorded action was taken for a game.
+    This loads the value from the Redis database.
+
+    gameID :: Unique Identifier for game in string form
+
+    returns -> time.Time :: time last action was made
+
+        -> error     :: non-nil if unable to read game metadata
+
+func IsUserInGame(userID string, gameID string) (bool, error)
+    Returns whether a user is in a game's roster (see JoinGame and leaveGame).
+
+    userID :: Unique Identifier for a user gameID :: Unique Identifier for game
+    in string form
+
+    returns -> bool :: true if the user is in the roster, false otherwise
+
+        -> error :: non-nil if unable to read game metadata
+
+func JoinGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    Join Game Endpoint adds the player to the roster of an existing game. This
+    means they can "applyActions" to the game (see game.go)
+
+func LeaveGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse
+    Leave Game Endpoint removes the player from the roster of an existing game.
+    This means they can no longer "applyActions" to the game (see game.go)
+
+func SetGameMetadata(metadata GameMetadata) error
+    Utility Function for changing Game Metadata with Redis
+
+    metadata :: New Metadata Value
+
+        (overwrites the id at metadata.id)
+
+func StartGameLogic() (func(), error)
+    ServerTask Startup Function for the third-party Game application. Takes care
+    of initialization. returns an error if the game can't be started (i.e.
+    prerequisites are not met)
+
+func StartRoomsSystem() (func(), error)
+    ServerTask Startup Function for Game Rooms. Takes care of initialization.
+    Sets Atomic Counter for GameIDs. Error is returned if the Database can't be
+    reached.
+
+func StringIDFromNumbers(counter int64) string
+    Provides a 12 character string ID from any given 64 bit Integer The ID uses
+    the characters 0-9 and a-z This is used for GameIDs
+
+func cleanUpGameLogic()
+    Cleanup Logic. Tries to terminate game, exits if it doesn't quit in a timely
+    manner. Reports error if it could not close game.
+
+func cleanUpRoomSystem()
+    CleanUp Function returned by Startup function. Doesn't do anything, but here
+    for consistency.
+
+func executeCommand()
+    Wrapper and secure configuration for os/exec
+
+
+TYPES
+
+type GameMetadata struct {
+	Id        string
+	Owner     string
+	CreatedAt int64 `json:",string"`
+	LastUsed  int64 `json:",string"`
+}
+    JSON Fields for the Create Game Command For Static game details
+
+func GetGameMetadata(gameID string) (GameMetadata, error)
+    Utility Function for selecting the game Metadata from redis
+
+    gameID :: string unique identifier for game.
+
+type GameWelcomeData struct {
+	Id         string
+	NumPlayers uint16 `json:",string"`
+	Data       string
+}
+    JSON Fields for the Join Game Command
+
+type SelectGameArgs struct {
+	GameID string
+}
+    Unmarshal Structure for Joining/Finding Games
+
+type actionServerPayload struct {
+	State map[string]interface{}
+	Relay map[string]interface{}
+}
+    JSON Fields for marshalling a JSON to the Game
+
+type applyActionRequest struct {
+	GameID string
+	Relay  map[string]interface{}
+}
+    JSON Fields for the Apply Action Command Args
+
+type getGameDataRequest struct {
+	GameID string
+}
+    JSON Fields for the GetGameData Command Args
+

@@ -1,0 +1,120 @@
+package util // import "laplace-entangled-env.com/internal/util"
+
+The util package represents common utility functions with no project
+references. These functions may be used freely across the project without
+dependency. This module hopes to limit the amount of duplicated code for the
+codebase. Hence they provide "utility" functionality.
+
+FUNCTIONS
+
+func Clear(data *[]byte)
+    Clears a given data slice provided to the input using an iterative loop.
+
+func Concat(output *[]byte, input *[]byte, outputStart int) error
+    Concatenates the input slice to index outputStart of the output slice. This
+    means that output[outputStart:outputStart + len(input)] will be overwritten
+    with the value of input. In addition, if output cannot store bytes up to
+    that last index, an error will be returned.
+
+func Errorless(fn ErrorRunnable)
+    Faults the application and logs if the function in the parameter returns an
+    error.
+
+func NewErrorJson(str string) []byte
+    Creates a JSON representing an object with an "error" field. The str
+    parameter represents the definition or value for said field. The byte slice
+    represents the "string" version of the JSON.
+
+func StrTokWithEscape(seperator *[]byte, escape *[]byte, str *[]byte, start uint) ([]byte, uint)
+    Tokenizes a byte slice similar to C styled strtok. seperator :: searched for
+    byte slice. Reaching this in the string results in a returned slice escape
+    :: escape byte slice. If escape slice is reached before seperator, the
+    search continues str :: the searched through slice start :: the starting
+    index to search Return :: slice representing the bytes from the start and
+    including the seperator (this may be a bug)
+
+        it will return a nil slice otherwise. This is paired with the length of the slice (or 0 for nil)
+
+    This was useful for the original schema of authentication. I wanted to parse
+    the information from a tilde (~) delimited string. This function may prove
+    useful later.
+
+
+TYPES
+
+type ErrorRunnable func() error
+    A Universal Type to represent any function that only returns an error. This
+    is an old predecessor of ServerTask
+
+type ThreadPool struct {
+	threadNum       int
+	unusedResources chan int
+	context         context.Context
+	cancel          context.CancelFunc
+	closed          bool
+}
+    A ThreadPool represents a pipeline implementation to limit the number of
+    goroutines for a set of given functions. Functions should be used to
+    initialize the structure correctly. Then functions may be submitted to be
+    synchronously added to the pipeline and be consumed asynchronously.
+    Threadpools use channels (hopefully well) to be threadsafe. I would suggest
+    committing to another package rather than my nooby code.
+
+func NewDummyThreadPool() ThreadPool
+    A Dummy ThreadPool may be useful for testing. It creates a ThreadPool which
+    starts off closed. It will simply reject tasks upon submission.
+
+func NewThreadPool(numberOfThreads int) ThreadPool
+    Constructs a new threadpool with a predefined "number of threads." This
+    represents the numerical limit of goroutines this object can launch. The
+    constraints of this can be described in later functions (see
+    SubmitFuncUnsafe and SubmitFuncBlock).
+
+    The Threadpool will also default to the background context since none is
+    provided.
+
+func NewThreadPoolWithContext(numberOfThreads int, outerContext context.Context) ThreadPool
+    Constructs a new threadpool with a predefined "number of threads." This
+    represents the numerical limit of goroutines this object can launch. The
+    constraints of this can be described in later functions (see
+    SubmitFuncUnsafe and SubmitFuncBlock).
+
+    The Threadpool will also construct a context with cancel off of the provided
+    context. The provided context should not be empty.
+
+func (tp ThreadPool) Finish(deadline time.Time) error
+    The threadpool will close. If it is already closed then this call will
+    result in error.
+
+    The thread pool consumes any resources not already consumed by other
+    goroutines. It continues this until the provided deadline. It will then
+    cancel the context and try one last time to consume any resources. If no
+    resources can be found it will respond an error.
+
+func (tp ThreadPool) SubmitFuncBlock(fun func(context.Context)) error
+    Adds a function to the threadpool. The function will be consumed by a
+    goroutine if available (is running less goroutines than the "number of
+    threads"). Otherwise it will "block" until one is. Additionally, the
+    function will be provided with the context of the threadpool. The function
+    should exit immediately if the context is "done". (See context.Context in
+    Golang Docs)
+
+    If the threadpool is closed, the threadpool will also return an error,
+    rejecting the function.
+
+    The term "blocking" means that the calling "thread" or runtime will be
+    paused to handle other code (i.e. other functions submitted to the thread
+    pool.) If this is not viable (i.e. you need to respond to the client) then
+    consider SubmitFuncUnsafe
+
+func (tp ThreadPool) SubmitFuncUnsafe(fun func(context.Context)) error
+    Adds a function to the threadpool. The function will be consumed by a
+    goroutine if available (is running less goroutines than the "number of
+    threads"). Otherwise it will return an error. Additionally, the function
+    will be provided with the context of the threadpool. The function should
+    exit immediately if the context is "done". (See context.Context in Golang
+    Docs)
+
+    If the threadpool is closed, the threadpool will also return an error,
+    rejecting the function.
+

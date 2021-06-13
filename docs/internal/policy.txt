@@ -1,0 +1,173 @@
+package policy // import "laplace-entangled-env.com/internal/policy"
+
+Policy is the type definitions and decoupling pattern for route and data.
+routes listen and inquire for commands to send to data data then sends back
+the responses for routes to use the format of communication between these
+modules is described here. It helps to define the structures used in
+requests and responses so the functions can be used internall (like with
+schedule)
+
+CONSTANTS
+
+const StaleGameDuration time.Duration = time.Duration(time.Minute * 5)
+    The amount of time a game can go without an action for. If nothing occurs
+    for x time on a game then it should be deleted
+
+
+TYPES
+
+type ClientCmd int64
+    Establish which endpoint/action the request is for
+
+    Typically the 2nd and 3rd bytes of a TCP Request
+
+const (
+	CmdError ClientCmd = iota
+	//                   //=====================
+	//                     Empty Command
+	//                   //=====================
+	CmdEmpty //          //0000_0000_0000_0000
+	//                   //=====================
+	//                     TLS Commands
+	//                   //=====================
+	CmdRegister //       //0000_0000_0000_0001
+	CmdLogin    //       //0000_0000_0000_0010
+	//                   //=====================
+	//                     Through Commands (To Third Party)
+	//                   //=====================
+	CmdAction  //        //0000_0000_0001_0000
+	CmdObserve //        //0000_0000_0001_0001
+	//                   //=====================
+	//                     User Management Commands
+	//                   //=====================
+	CmdGetUser //        //0000_0001_0000_0000
+	//                   //=====================
+	//                     Game Management Commands
+	//                   //=====================
+	CmdGameCreate //     //0000_0010_0000_0000
+	CmdGameJoin   //     //0000_0010_0000_0001
+	CmdGameLeave  //     //0000_0010_0000_0010
+	CmdGameDelete //     //0000_0010_0000_0011
+
+)
+    Enum Consisting of all the ClientCommands. The comments also map what each
+    command should map to in TCP
+
+type CommandResponse struct {
+	// Data to be Digested
+	Data interface{}
+
+	// Digesting method for Data Field
+	Digest func(interface{}) ([]byte, error)
+
+	// Raw Data to be written without Digest
+	Raw []byte
+
+	// Response with Data + Digest or use Raw Field
+	UseRaw bool
+
+	// Server Error to be Logged, rejecting request.
+	ServerError error
+}
+    Abstracted Response Information from a Command
+
+    The Command Response is a structure that with certain values filled is
+    communicable back to the route/listner module functions to then transform
+    back into packets/bytes/http whatever.
+
+    While you are perfectly allowed to define these on your own there are
+    premade functions below for common responses.
+
+func RawSuccessfulResponse(msg string) CommandResponse
+    Send bytes back to the user
+
+    msg :: string of what you want to be sent back
+
+    WARNING: msg should not be a constant string!
+
+func RawSuccessfulResponseBytes(msg *[]byte) CommandResponse
+    Send bytes back to the user
+
+    msg :: byte slice of what you want to be sent back
+
+func RawUnsuccessfulResponse(err string) CommandResponse
+    Send bytes back to the user
+
+    msg :: string of what you want to be sent back
+
+    WARNING: msg should not be a constant string! No different from
+    RawSuccessfulResponse, but we may change that in the future.
+
+func RespWithError(err error) CommandResponse
+    Reject the request and tell the user to come back tomorrow...
+
+        there are server issues today
+
+    err : Error received from doing something
+
+        (something that contains a string to be logged)
+
+func SuccessfulResponse() CommandResponse
+    Accept the request and respond with the mystical "Successful: true"
+
+func UnSuccessfulResponse(err string) CommandResponse
+    Reject the request by telling the user what they did wrong... "Sorry Hacker
+    but our server doesn't work like that" ... Maybe something a bit nicer...
+
+    err : a string to be sent to the user
+
+func UnSuccessfulResponseError(err error) CommandResponse
+    Reject the request by telling the user what they did wrong... "Sorry Hacker
+    but our server doesn't work like that" ... Maybe something a bit nicer...
+
+    err : Error received from doing something
+
+        (something that contains a string to be sent to the user)
+
+type RequestAttachment struct {
+	// Who the Command is From
+	UserID string
+
+	// Request Signature for Authentication
+	Sig string
+}
+    TCP Request Attachment JSON or ASN1 Attachment for Authentication and
+    Regulation
+
+    Parsed Into Request Header
+
+type RequestBodyFactories struct {
+	// Interface Parameter should be a pointer
+	ParseFactory func(ptr interface{}) error
+
+	SigVerify func(userID string, userSig string) error
+}
+    The Request Body Represents the data for the command. Since each command has
+    different arguments (and using byte slices can only go so far) we use
+    factory functions to gather all the required data. (I use Factories here but
+    they are more defered Transformation/Map Functions).
+
+type RequestHeader struct {
+	// Command To Be Handled (i.e. Sent in TCP Prefix)
+	Command ClientCmd
+
+	// Who the Command is From
+	UserID string
+
+	// Request Signature for Authenticated Requests
+	Sig string
+}
+    The Request Header represents the metadata for requests that all requests
+    need. This represents the selected endpoint and authentication data needed
+    for some commands (these values) may be empty for public commands.
+
+type SuccessfulData struct {
+	Successful bool
+	Err        string
+}
+    Data Interface for JSON parsing. Isn't really used to communicate within the
+    Application, but makes creating the Json with golangs Json package easier.
+
+    The Struct has to be public so the package can parse, but refrain from using
+    in parameters/return types etc.
+

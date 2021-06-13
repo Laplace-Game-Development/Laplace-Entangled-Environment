@@ -1,3 +1,6 @@
+// The schedule package takes care of any "scheduled tasks". Using a combination of
+// Cron and ZeroMQ, the schedule package distributes the consumption of tasks to
+// multiple workers in order to speed up work as much as possible.
 package schedule
 
 import (
@@ -10,18 +13,25 @@ import (
 	"laplace-entangled-env.com/internal/redis"
 )
 
+// A Cron Event represents a function that should be run
+// at a certain schedule. This structure should be used
+// when scheduling events at the onset of the application
 type CronEvent struct {
 	Schedule string
 	Event    func()
 }
 
 // Ledger of Cron Events
-// This shouldn't be changed by the code.
+// This shouldn't be changed by the code. Used when initially scheduling
+// functions to be run.
 var initialCronLedger []CronEvent = []CronEvent{
 	{"5 * * * * *", eventCheckHealth},
 }
 
-// Global Variables | Singletons
+//// Global Variables | Singletons
+
+// Cron scheduling reference. This should only be used by this module.
+// if you want to dynamically schedule (for whatever reason) use this
 var masterCron *cron.Cron = nil
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -30,6 +40,7 @@ var masterCron *cron.Cron = nil
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// ServerTask Startup Function for Cron Scheduling. Takes care of initialization.
 func StartCronScheduler() (func(), error) {
 	err := initialSchedule()
 	if err != nil {
@@ -39,6 +50,8 @@ func StartCronScheduler() (func(), error) {
 	return cleanUpCronScheduler, nil
 }
 
+// CleanUp Function returned by Startup function. Stops all Cron scheduling and reports
+// errors that occur when doing so.
 func cleanUpCronScheduler() {
 	log.Println("Cleaning Cron Jobs!")
 	ctx := masterCron.Stop()
@@ -50,6 +63,9 @@ func cleanUpCronScheduler() {
 	log.Println("Cron Jobs Clean!")
 }
 
+// Schedule Initialization called from StartCronScheduler. Goes through the
+// "initialCronLedger" and adds each entry to the Cron scheduling reference.
+// It also intitializes the Cron scheduling instance.
 func initialSchedule() error {
 	masterCron = cron.New(cron.WithSeconds())
 
@@ -70,6 +86,9 @@ func initialSchedule() error {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Function added through the "initialCronLedger." Pops entries off of a list representing
+// possibly old and unused games that need their data cleaned up. Send the data to Workers.
+// See healthTaskWork to see how this data is used.
 func eventCheckHealth() {
 	gameIDSlice := make([]string, EventHealthTaskCapacity)
 	gameIDSlicePrefixed := make([]string, EventHealthTaskCapacity)
