@@ -7,9 +7,9 @@ import (
 	"errors"
 	"log"
 
-	"laplace-entangled-env.com/internal/data"
-	"laplace-entangled-env.com/internal/policy"
-	"laplace-entangled-env.com/internal/util"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/data"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/util"
 )
 
 // commandMap is the mappings of the 2 byte codes to ClientCommands.

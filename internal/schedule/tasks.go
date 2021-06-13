@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/data"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/route"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
 	"github.com/pebbe/zmq4"
-	"laplace-entangled-env.com/internal/data"
-	"laplace-entangled-env.com/internal/event"
-	"laplace-entangled-env.com/internal/policy"
-	"laplace-entangled-env.com/internal/route"
-	"laplace-entangled-env.com/internal/zeromq"
 )
 
 //// Configurables

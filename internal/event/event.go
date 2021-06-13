@@ -4,8 +4,8 @@
 package event
 
 import (
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
 	"github.com/mediocregopher/radix/v3"
-	"laplace-entangled-env.com/internal/redis"
 )
 
 //// Table / Datastructure Names

@@ -1,4 +1,4 @@
-package redis // import "laplace-entangled-env.com/internal/redis"
+package redis // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
 
 
 CONSTANTS

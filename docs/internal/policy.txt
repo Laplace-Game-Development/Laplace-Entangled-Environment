@@ -1,4 +1,4 @@
-package policy // import "laplace-entangled-env.com/internal/policy"
+package policy // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
 
 Policy is the type definitions and decoupling pattern for route and data.
 routes listen and inquire for commands to send to data data then sends back

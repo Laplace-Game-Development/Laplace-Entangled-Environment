@@ -1,4 +1,4 @@
-package util // import "laplace-entangled-env.com/internal/util"
+package util // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/util"
 
 The util package represents common utility functions with no project
 references. These functions may be used freely across the project without

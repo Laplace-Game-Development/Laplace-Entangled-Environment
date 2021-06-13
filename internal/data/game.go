@@ -10,11 +10,11 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
 	"github.com/mediocregopher/radix/v3"
 	"github.com/pebbe/zmq4"
-	"laplace-entangled-env.com/internal/policy"
-	"laplace-entangled-env.com/internal/redis"
-	"laplace-entangled-env.com/internal/zeromq"
 )
 
 //// Configurables

@@ -18,8 +18,8 @@ import (
 	"net/http"
 	"time"
 
-	"laplace-entangled-env.com/internal/policy"
-	"laplace-entangled-env.com/internal/util"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/util"
 )
 
 //// Configurables

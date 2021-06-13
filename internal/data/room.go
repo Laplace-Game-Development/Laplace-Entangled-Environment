@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
 	"github.com/mediocregopher/radix/v3"
-	"laplace-entangled-env.com/internal/event"
-	"laplace-entangled-env.com/internal/policy"
-	"laplace-entangled-env.com/internal/redis"
 )
 
 //// Configurables

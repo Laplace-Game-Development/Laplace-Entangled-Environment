@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
 	"github.com/mediocregopher/radix/v3"
 	"github.com/robfig/cron/v3"
-	"laplace-entangled-env.com/internal/event"
-	"laplace-entangled-env.com/internal/redis"
 )
 
 // A Cron Event represents a function that should be run

@@ -1,4 +1,4 @@
-package zeromq // import "laplace-entangled-env.com/internal/zeromq"
+package zeromq // import "github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
 
 The ZeroMQ module is the holder and initializer for the third-party ZeroMQ
 Library.
