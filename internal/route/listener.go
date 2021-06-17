@@ -341,7 +341,7 @@ type TCPRequestPrefix struct {
 // ctx :: Owning Context
 func startTCPListening(ctx context.Context) {
 	log.Println("TCP Listening on " + ListeningTCPIpAddress + ListeningTCPPortNumber + "!")
-	ln, err := net.Listen("tcp", ListeningTCPIpAddress+":"+ListeningTCPPortNumber)
+	ln, err := net.Listen("tcp", ListeningTCPIpAddress+ListeningTCPPortNumber)
 	if err != nil {
 		log.Fatal(err)
 	}
