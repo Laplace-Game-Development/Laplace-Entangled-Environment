@@ -12,7 +12,6 @@ import (
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
-	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/route"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
 	"github.com/mediocregopher/radix/v3"
 	"github.com/pebbe/zmq4"
@@ -400,7 +399,7 @@ func healthTaskWork(args []string) error {
 	}
 
 	if gameTime.Add(policy.StaleGameDuration).Before(time.Now().UTC()) {
-		superUserRequest, err := route.RequestWithSuperUser(true, policy.CmdGameDelete, data.SelectGameArgs{GameID: args[0]})
+		superUserRequest, err := policy.RequestWithSuperUser(true, policy.CmdGameDelete, data.SelectGameArgs{GameID: args[0]})
 		if err != nil {
 			return err
 		}

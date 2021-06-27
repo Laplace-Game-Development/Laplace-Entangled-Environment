@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"reflect"
 	"strconv"
 	"time"
 
@@ -71,10 +70,6 @@ const TokenLength int = 256
 // is required
 const TokenStaleTime time.Duration = time.Minute * 5
 
-// UserID For Request Made From the Server rather than
-// from a user. Useful for papertrails.
-const SuperUserID string = "-1"
-
 //
 // Register/Login Configurables
 
@@ -110,18 +105,6 @@ var secureMap map[policy.ClientCmd]bool = map[policy.ClientCmd]bool{
 type UserInfo struct {
 	AuthID   string
 	Username string
-}
-
-// Required Fields for any connection
-// see calculateResponse
-// or see switchOnCommand
-//
-// The structure is wrapped for easy of returning from a
-// constructing function.
-type SuperUserRequest struct {
-	Header             policy.RequestHeader
-	BodyFactories      policy.RequestBodyFactories
-	IsSecureConnection bool
 }
 
 // ServerTask Startup Function for Encryption. Takes care of initialization.
@@ -442,37 +425,6 @@ func GetUser(header policy.RequestHeader, bodyFactories policy.RequestBodyFactor
 //// Utility Security Functions
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-
-// Functin to construct internal request with from a "Super User". Useful for
-// using endpoints with a specific papertrail. Super Users have a lot
-// more privaledges in checks than other users, but they can do this because
-// they skip the parsing steps. SigVerify automatically returns a nil error.
-// This could(/should) never happen from outside the system.
-//
-// isTask :: true if task is making the request and false otherwise
-//      (old parameter and not necessary)
-// cmd    :: Selected Endpoint to be requested
-// args   :: struct to use for args for endpoint
-// returns -> SuperUserRequest struct for making the request.
-func RequestWithSuperUser(isTask bool, cmd policy.ClientCmd, args interface{}) (SuperUserRequest, error) {
-	// shortcut bodyfactory using reflection
-	bodyFactories := policy.RequestBodyFactories{
-		ParseFactory: func(ptr interface{}) error {
-			ptrValue := reflect.ValueOf(ptr)
-			argsVal := reflect.ValueOf(args)
-			ptrValue.Elem().Set(argsVal)
-			return nil
-		},
-		SigVerify: func(userID string, userSig string) error {
-			return nil
-		},
-	}
-
-	// Body Start is only used in main.go and is not necessary for a manual request command
-	header := policy.RequestHeader{Command: cmd, UserID: SuperUserID}
-
-	return SuperUserRequest{Header: header, BodyFactories: bodyFactories, IsSecureConnection: true}, nil
-}
 
 // Typical Verification of users for authentication. Used in most
 // other endpoints as SigVerify in RequestBodyFactories
