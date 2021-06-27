@@ -27,7 +27,7 @@ const NumberOfTaskWorkers uint8 = 5
 const ProxyControlPort string = ":5567"
     Proxy Control Port for Interrupting Proxy
 
-const ProxyPubPort string = ":5565"
+const ProxyFEPort string = ":5565"
     Proxy Publish Port for sending to (application)
 
 const ProxySubPort string = ":5566"

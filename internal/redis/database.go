@@ -24,7 +24,6 @@ var MasterRedis radix.Client = nil
 
 // ServerTask Startup Function for Redis Database. Takes care of initialization.
 func StartDatabase() (func(), error) {
-
 	// Ah yes! A Thread safe pool implementation. PERRRRFECT
 	pool, err := radix.NewPool("tcp", RedisIpAddress+RedisPortNumber, 10)
 	if err != nil {

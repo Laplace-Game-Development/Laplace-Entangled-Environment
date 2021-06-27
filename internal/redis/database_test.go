@@ -39,10 +39,10 @@ func TestStartDatabase(t *testing.T) {
 // NOTE: This test starts with a lowercase letter because it is a subtest
 func testPingPong(t *testing.T) {
 	var message string
-	err := MasterRedis.Do(radix.Cmd(&message, "PING"))
+	err := MasterRedis.Do(radix.Cmd(&message, "PING", "THIS IS A TEST!"))
 	if err != nil {
 		t.Errorf("Redis Could Not Be Pinged! Err: %v\n", err)
-	} else if message != "PONG" {
+	} else if message != "THIS IS A TEST!" {
 		t.Errorf("Did not recieve PONG from PING! Message: %s\n", message)
 	}
 }

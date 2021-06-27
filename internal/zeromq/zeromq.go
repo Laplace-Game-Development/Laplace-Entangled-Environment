@@ -36,10 +36,11 @@ func StartZeroMqComms() (func(), error) {
 func cleanUpZeroMq() {
 	log.Println("Terminating ZeroMQ!")
 
-	err := MasterZeroMQ.Term()
-	if err != nil {
-		log.Fatalf("ZeroMQ Cannot Be Terminated! Error: %v\n", err)
-	}
+	// This caused infinite loops on cleanup with some sockets
+	// err := MasterZeroMQ.Term()
+	// if err != nil {
+	// 	log.Fatalf("ZeroMQ Cannot Be Terminated! Error: %v\n", err)
+	// }
 
 	log.Println("ZeroMQ Terminated")
 }

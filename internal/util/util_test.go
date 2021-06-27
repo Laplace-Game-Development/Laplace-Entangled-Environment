@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+// Number of checks done in RandStringN testing
+const randomChecks = 500
+
+// Number of characters in given strings
+const numberOfChars = 128
+
+// The Maximum Weight a random String Should See before failure
+const maxPercentWeight = 20
+
 func TestClear(t *testing.T) {
 	bytes0 := []byte{'a', 'b', 'c', 'd', 'e'}
 	Clear(&bytes0)
@@ -149,4 +158,26 @@ func TestConcat(t *testing.T) {
 	}
 
 	t.Logf("Woohoo Found: %s\n", concatBytes)
+}
+
+func TestRandStringN(t *testing.T) {
+	checkList := map[string]int{}
+	var temp string
+	var value int
+	var exists bool
+	for i := 0; i < randomChecks; i++ {
+		temp = RandStringN(numberOfChars)
+		if len(temp) != numberOfChars {
+			t.Errorf("Did Not Get Expected Number of Characters. Length: %d\tString %v\n", len(temp), temp)
+		}
+
+		value, exists = checkList[temp]
+
+		if !exists {
+			checkList[temp] = 1
+		} else if (value * 100 / i) > maxPercentWeight {
+			checkList[temp] += 1
+			t.Errorf("Got too many of the same string!\nMap: %v\n", checkList)
+		}
+	}
 }

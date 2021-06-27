@@ -93,7 +93,12 @@ func eventCheckHealth() {
 	gameIDSlice := make([]string, EventHealthTaskCapacity)
 	gameIDSlicePrefixed := make([]string, EventHealthTaskCapacity)
 
-	err := redis.MasterRedis.Do(radix.Cmd(&gameIDSlice, "LPOP", event.HealthTaskQueue, fmt.Sprintf("%d", EventHealthTaskCapacity)))
+	err := redis.MasterRedis.Do(radix.Cmd(&gameIDSlice, "LRANGE", event.HealthTaskQueue, "0", fmt.Sprintf("%d", EventHealthTaskCapacity-1)))
+	if err != nil {
+		log.Fatalln("Trouble Using Health Event: " + err.Error())
+	}
+
+	err = redis.MasterRedis.Do(radix.Cmd(nil, "LTRIM", event.HealthTaskQueue, fmt.Sprintf("%d", EventHealthTaskCapacity), "-1"))
 	if err != nil {
 		log.Fatalln("Trouble Using Health Event: " + err.Error())
 	}
@@ -102,14 +107,11 @@ func eventCheckHealth() {
 		return
 	}
 
-	temp := make([]string, 1)
-
 	for i, s := range gameIDSlice {
-		temp[0] = s
-		gameIDSlicePrefixed[i] = constructTaskWithPrefix(HealthTaskPrefix, temp)
+		gameIDSlicePrefixed[i] = constructTaskWithPrefix(HealthTaskPrefix, s)
 	}
 
-	err = sendTasksToWorkers(gameIDSlicePrefixed)
+	err = SendTasksToWorkers(gameIDSlicePrefixed...)
 	if err != nil {
 		log.Fatalf("Trouble Using Health Event! Error: %v", err.Error())
 	}

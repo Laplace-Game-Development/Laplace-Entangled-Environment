@@ -3,6 +3,8 @@ package util
 import (
 	"errors"
 	"log"
+	"math/rand"
+	"strings"
 )
 
 // A Universal Type to represent any function that only returns an error.
@@ -100,4 +102,17 @@ func Errorless(fn ErrorRunnable) {
 	if err != nil {
 		log.Fatalln(err)
 	}
+}
+
+var alphabet []rune = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890")
+var alphaLen = len(alphabet)
+
+// Creates a random string of given size using runes [a-z] | [A-Z] | [0-9] characters
+func RandStringN(n int) string {
+	sb := strings.Builder{}
+	sb.Grow(n)
+	for i := 0; i < n; i++ {
+		sb.WriteRune(alphabet[rand.Int()%alphaLen])
+	}
+	return sb.String()
 }

@@ -44,6 +44,7 @@ func main() {
 	log.Println("Press Enter To Exit!")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
 	log.Println("Cleaning Up!")
+
 }
 
 //// Utility Functions
