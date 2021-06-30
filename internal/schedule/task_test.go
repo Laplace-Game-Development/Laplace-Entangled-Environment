@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/startup"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/util"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
 	"github.com/mediocregopher/radix/v3"
@@ -16,22 +17,12 @@ const values int = 20
 const waitTime time.Duration = time.Second * 5
 
 func TestTask(t *testing.T) {
-	cleanup, err := redis.StartDatabase()
-	if err != nil {
-		t.Errorf("Error starting redis connection! Err: %v\n", err)
-	}
-	defer cleanup()
-
-	cleanup, err = zeromq.StartZeroMqComms()
-	if err != nil {
-		t.Errorf("Error starting zeromq Communication Layer! Err: %v\n", err)
-	}
-	defer cleanup()
-
-	cleanup, err = StartTaskQueue()
-	if err != nil {
-		t.Errorf("Error starting Task Queue! Err: %v\n", err)
-	}
+	cleanup := startup.InitServerStartupOnTaskList(
+		[]startup.ServerTask{
+			redis.StartDatabase,
+			zeromq.StartZeroMqComms,
+			StartTaskQueue,
+		})
 	defer cleanup()
 
 	t.Run("UnitTestTask", testUnitTestTask)

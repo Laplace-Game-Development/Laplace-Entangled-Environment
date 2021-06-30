@@ -7,6 +7,7 @@ import (
 
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/startup"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
 	"github.com/mediocregopher/radix/v3"
 	"github.com/pebbe/zmq4"
@@ -24,16 +25,11 @@ func TestStartupAndCleanup(t *testing.T) {
 }
 
 func TestEventHealthCheck(t *testing.T) {
-	cleanup, err := redis.StartDatabase()
-	if err != nil {
-		t.Errorf("Error occurred in starting Redis! Err: %v\n", err)
-	}
-	defer cleanup()
-
-	cleanup, err = zeromq.StartZeroMqComms()
-	if err != nil {
-		t.Errorf("Error occurred in starting zeromq! Err: %v\n", err)
-	}
+	cleanup := startup.InitServerStartupOnTaskList(
+		[]startup.ServerTask{
+			redis.StartDatabase,
+			zeromq.StartZeroMqComms,
+		})
 	defer cleanup()
 
 	// Empty Queue Should Return
@@ -50,7 +46,7 @@ func TestEventHealthCheck(t *testing.T) {
 		check[fmt.Sprintf("%d", nums[i])] = false
 	}
 
-	err = redis.MasterRedis.Do(radix.Pipeline(cmds...))
+	err := redis.MasterRedis.Do(radix.Pipeline(cmds...))
 	if err != nil {
 		t.Errorf("Error occurred in sendin records to Redis! Err: %v\n", err)
 	}

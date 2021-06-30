@@ -90,7 +90,7 @@ func cleanUpRoomSystem() {
 // JSON Fields for the Join Game Command
 type GameWelcomeData struct {
 	Id         string
-	NumPlayers uint16 `json:",string"`
+	NumPlayers uint16
 	Data       string
 }
 
@@ -253,10 +253,13 @@ func JoinGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFacto
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if success < 1 {
-		log.Printf("User Tried to Add Themselves More Than Once: " + args.GameID)
+		log.Printf("User Tried to Add Themselves More Than Once!\nGameID: %s\tPlayerID: %s\n", args.GameID, header.UserID)
 	}
 
 	err = redis.MasterRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+args.GameID))
+	if err != nil {
+		log.Printf("Redis Error! Err %v\n", err)
+	}
 
 	return policy.CommandResponse{
 		Data:   GameWelcomeData{Id: args.GameID, NumPlayers: numPlayers, Data: gameDataSerialized},
@@ -282,6 +285,7 @@ func LeaveGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFact
 
 	var doesGameExist bool
 	var numPlayers uint16
+	var diff uint16
 
 	err = redis.MasterRedis.Do(radix.Cmd(&doesGameExist, "HEXISTS", GameHashSetName, args.GameID))
 	if err != nil {
@@ -292,10 +296,17 @@ func LeaveGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFact
 		return policy.UnSuccessfulResponse("Game Does Not Exist!")
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&numPlayers, "SREM", PlayerSetPrefix+args.GameID, "-1", header.UserID))
+	err = redis.MasterRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+args.GameID))
 	if err != nil {
 		return policy.RespWithError(err)
-	} else if numPlayers <= 0 {
+	}
+
+	err = redis.MasterRedis.Do(radix.Cmd(&diff, "SREM", PlayerSetPrefix+args.GameID, header.UserID))
+	if err != nil {
+		return policy.RespWithError(err)
+	} else if diff == 0 {
+		return policy.UnSuccessfulResponse(args.GameID)
+	} else if numPlayers-diff <= 0 {
 		event.SubmitGameForHealthCheck(args.GameID)
 	}
 
