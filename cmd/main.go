@@ -24,6 +24,7 @@ var serverInitTaskList []startup.ServerTask = []startup.ServerTask{
 	zeromq.StartZeroMqComms,
 	////////////////////////
 	route.StartEncryption,
+	data.StartUsers,
 	data.StartRoomsSystem,
 	schedule.StartTaskQueue,
 	schedule.StartCronScheduler,

@@ -1,6 +1,7 @@
 package route
 
 import (
+	"bytes"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
@@ -17,9 +18,9 @@ import (
 //
 // This should never change during runtime!
 var commandMap map[int64]policy.ClientCmd = map[int64]policy.ClientCmd{
-	1<<0 + 0: policy.CmdEmpty,
-	1<<0 + 1: policy.CmdRegister,
-	1<<0 + 2: policy.CmdLogin,
+	0000 + 0: policy.CmdEmpty,
+	0000 + 1: policy.CmdRegister,
+	0000 + 2: policy.CmdLogin,
 	1<<4 + 0: policy.CmdAction,
 	1<<4 + 1: policy.CmdObserve,
 	1<<5 + 0: policy.CmdGetUser,
@@ -110,11 +111,11 @@ func switchOnCommand(header policy.RequestHeader, bodyFactories policy.RequestBo
 
 	// TLS Commands
 	case policy.CmdRegister:
-		res = Register(header, bodyFactories, isSecureConnection)
+		res = data.Register(header, bodyFactories, isSecureConnection)
 		break
 
 	case policy.CmdLogin:
-		res = Login(header, bodyFactories, isSecureConnection)
+		res = data.Login(header, bodyFactories, isSecureConnection)
 		break
 
 	// cmdStartTLS is an exception to this switch statement. (It occurs in main.go)
@@ -130,7 +131,7 @@ func switchOnCommand(header policy.RequestHeader, bodyFactories policy.RequestBo
 
 	// User Management Commands
 	case policy.CmdGetUser:
-		res = GetUser(header, bodyFactories, isSecureConnection)
+		res = data.GetUser(header, bodyFactories, isSecureConnection)
 		break
 
 	// Game Management Commands
@@ -172,7 +173,7 @@ func switchOnCommand(header policy.RequestHeader, bodyFactories policy.RequestBo
 // returns -> copy of the data which is base64 decoded
 func base64Decode(data *[]byte) ([]byte, error) {
 	res := make([]byte, base64.StdEncoding.DecodedLen(len(*data)))
-	_, err := base64.StdEncoding.Decode(*data, res)
+	_, err := base64.StdEncoding.Decode(res, *data)
 	return res, err
 }
 
@@ -187,22 +188,13 @@ func base64Decode(data *[]byte) ([]byte, error) {
 //                 else it returns nil
 func decodeJsonAttachment(data *[]byte) (policy.RequestAttachment, int, error) {
 	res := policy.RequestAttachment{}
-	err := json.Unmarshal(*data, &res)
+	dec := json.NewDecoder(bytes.NewReader(*data))
+	err := dec.Decode(&res)
 	if err != nil {
 		return res, 0, err
 	}
 
-	var counter int
-	length := len(*data)
-	for counter = 0; counter < length; counter += 1 {
-		if (*data)[counter] == byte('}') {
-			break
-		}
-	}
-
-	bodyFactoryStart := counter
-
-	return res, bodyFactoryStart, nil
+	return res, int(dec.InputOffset()), nil
 }
 
 // Decodes the data byte slice from ASN1 using policy.RequestAttachment. It
