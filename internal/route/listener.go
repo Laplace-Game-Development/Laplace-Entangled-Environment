@@ -30,7 +30,7 @@ const ShutdownDuration time.Duration = 10 * time.Second
 /* Client TCP Settings */
 
 // Time spent waiting for incomming connections before checking for control signals/shutoff/etc
-const IoDeadline time.Duration = 5 * time.Millisecond
+const IoDeadline time.Duration = 5 * time.Second
 
 // TCP IP Mask to listen for connections on
 const ListeningTCPIpAddress string = "127.0.0.1"
@@ -55,6 +55,14 @@ var MalformedDataMsg []byte = []byte("{\"success\": false, \"error\": \"Data Was
 // Constant integer length of a JSON byte string representing a data malformed error
 // May be moved to Policy
 var MalformedDataMsgLen int = len([]byte("{\"success\": false, \"error\": \"Data Was Malformed!\"}"))
+
+// Constant byte string of JSON representing a Secured Connection
+// May be moved to Policy
+var SecureConnectionMsg []byte = []byte("{\"success\": true, \"message\": \"SECURED!\"}")
+
+// Constant integer length of a JSON byte string representing a Secured Connection
+// May be moved to Policy
+var SecureConnectionMsgLen int = len([]byte("{\"success\": true, \"message\": \"SECURED!\"}"))
 
 // HTTP Listening Host IP
 const HttpHost string = "127.0.0.1"
@@ -376,8 +384,6 @@ func startTCPListening(ctx context.Context) {
 // clientConn :: Metadata and reference to TCP Connection
 func handleTCPConnection(ctx context.Context, clientConn TCPClientConn) {
 	log.Println("New Connection!")
-	// Set Timeout
-	clientConn.conn.SetReadDeadline(time.Now().Add(IoDeadline))
 	defer clientConn.conn.Close()
 	defer log.Println("Connection Closed!")
 
@@ -422,32 +428,41 @@ func handleTCPConnection(ctx context.Context, clientConn TCPClientConn) {
 //            true | command was successful
 //           false | command was unsuccessful
 func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool {
+	// Set Timeout
+	clientConn.conn.SetReadDeadline(time.Now().Add(IoDeadline))
+
 	n, err := clientConn.conn.Read(*dataIn)
 	if err != nil {
-		log.Println(err)
+		log.Printf("Error Reading TCP Data! Bytes Received: %d! Bytes: %s | Err: %s", n, dataIn, err)
 		return false
 	}
 
 	prefix, err := parseTCPPrefix(n, dataIn)
 	if err != nil {
-		log.Println(err)
+		log.Printf("Error Parsing TCP Request! Err: %s\n", err)
 		return false
 	}
 
 	returnWithoutRequest, err := SecureTCPConnIfNeeded(&clientConn, prefix)
 	if err != nil {
-		log.Println(err)
+		log.Printf("Error checking for connection security! Err: %s\n", err)
 		return false
 	} else if returnWithoutRequest {
+		clientConn.conn.SetWriteDeadline(time.Now().Add(IoDeadline))
+		err = writeTCPResponse(clientConn, &SecureConnectionMsg, SecureConnectionMsgLen)
+		if err != nil {
+			log.Printf("Error Securing Request! Err: %s\n", err)
+		}
 		return true
 	}
 
 	header, bodyFactory, err := generateRequestFromTCP(n, dataIn, prefix)
 	if err != nil {
-		log.Println(err)
+		log.Printf("Error Generating Request Command Payloads! Err: %s\n", err)
+		clientConn.conn.SetWriteDeadline(time.Now().Add(IoDeadline))
 		err = writeTCPResponse(clientConn, &MalformedDataMsg, MalformedDataMsgLen)
 		if err != nil {
-			log.Println(err)
+			log.Printf("Error Writing TCP Response For Malformed Data! Err: %s\n", err)
 		}
 
 		return false
@@ -456,9 +471,10 @@ func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool {
 	response, err := calculateResponse(header, bodyFactory, clientConn.isSecured)
 
 	// Tokenize and Encrypt Response Here
+	clientConn.conn.SetWriteDeadline(time.Now().Add(IoDeadline))
 	err = writeTCPResponse(clientConn, &response, len(response))
 	if err != nil {
-		log.Println(err)
+		log.Printf("Error Writing TCP Response! Err: %s\n", err)
 	}
 
 	return true
@@ -569,6 +585,8 @@ func writeTCPResponse(clientConn TCPClientConn, response *[]byte, length int) er
 
 		numSent += n
 	}
+
+	clientConn.conn.Write([]byte{4})
 
 	return nil
 }

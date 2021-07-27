@@ -21,7 +21,9 @@ The application will support running of different binaries to communicate with. 
 `go run ./cmd/main.go` will run the application
 
 ## Testing the Project
-`go test ./...` will run all tests associated with the application
+This will run all tests associated with the application in the present working directory
+- For Windows: `go test ./... -v -args -cwd="%cd%"`
+- For Linux/OSX: `go test ./... -v -args -cwd="$PWD"`
 
 ## Documentation
 

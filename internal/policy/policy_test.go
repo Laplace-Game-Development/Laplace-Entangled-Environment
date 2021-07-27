@@ -1,6 +1,9 @@
 package policy
 
 import (
+	"flag"
+	"fmt"
+	"os"
 	"testing"
 )
 
@@ -11,6 +14,20 @@ var testMessageBytes []byte = []byte(testMessage)
 var unSuccessfulJSON []byte = []byte("{\"Successful\":false,\"Err\":\"FooBar\"}")
 var successfulJSON []byte = []byte("{\"Successful\":true,\"Err\":\"\"}")
 
+var (
+	cwd_arg = flag.String("cwd", "", "set cwd")
+)
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if *cwd_arg != "" {
+		if err := os.Chdir(*cwd_arg); err != nil {
+			fmt.Println("Chdir error:", err)
+		}
+	}
+
+	os.Exit(m.Run())
+}
 func parseResponse(cr CommandResponse) ([]byte, error) {
 	if cr.UseRaw {
 		return cr.Raw, nil

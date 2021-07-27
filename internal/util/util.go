@@ -2,6 +2,7 @@ package util
 
 import (
 	"errors"
+	"io"
 	"log"
 	"math/rand"
 	"strings"
@@ -115,4 +116,63 @@ func RandStringN(n int) string {
 		sb.WriteRune(alphabet[rand.Int()%alphaLen])
 	}
 	return sb.String()
+}
+
+// Batch read from a connection in a series of byte slice reads. This will continue to occur until
+// the delimitting byte is reached.
+//
+// conn       :: connection to read from. This connection should have a read deadline
+// delimitter :: byte representing the End of the Transmission / End of File
+// batchSize  :: integer size of slices to be created per read
+// batchMax   :: integer number of batches representing the max number of batches before return
+//
+// This was useful for the original schema of TCP. EOT character is typically used for delimitter
+func BatchReadConnection(conn io.Reader, delimitter byte, batchSize int, batchMax int) ([]byte, error) {
+	batches := make([](*[]byte), batchMax)
+	var batchReadSize int
+
+	for iterator := 0; iterator < batchMax; iterator += 1 {
+		batch := make([]byte, batchSize)
+		batchReadSize, err := conn.Read(batch)
+		batches[iterator] = &batch
+
+		log.Printf("Read %d Bytes\n", batchReadSize)
+		if batchReadSize > 0 {
+			delimIndex := getDelimIndex(&batch, delimitter, batchReadSize)
+			if delimIndex > -1 {
+				return resolveBatchReadConnection(batches, batchSize, delimIndex, iterator, nil)
+			}
+		}
+
+		if batchReadSize < batchSize || err != nil {
+			return resolveBatchReadConnection(batches, batchSize, batchReadSize, iterator, err)
+		}
+	}
+
+	return resolveBatchReadConnection(batches, batchSize, batchReadSize, batchMax, nil)
+}
+
+// simple sequential search for a delimitter in a byte string
+func getDelimIndex(batch *[]byte, delimitter byte, length int) int {
+	for iterator := 0; iterator < length; iterator += 1 {
+		if (*batch)[iterator] == delimitter {
+			return iterator
+		}
+	}
+
+	return -1
+}
+
+// Concatenate an array of pointers to byte batches and return non-nil errors
+func resolveBatchReadConnection(batches [](*[]byte), batchSize int, lastReadSize int, numberOfBatches int, err error) ([]byte, error) {
+	length := (batchSize * numberOfBatches) + lastReadSize
+	result := make([]byte, length)
+
+	log.Printf("Length: %d\n", length)
+	for iterator := 0; iterator < length; iterator += 1 {
+		log.Printf("Indexing %d with [%d][%d]\n", iterator, iterator/batchSize, iterator%batchSize)
+		result[iterator] = (*batches[iterator/batchSize])[iterator%batchSize]
+	}
+
+	return result, err
 }

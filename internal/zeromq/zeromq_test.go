@@ -1,6 +1,9 @@
 package zeromq
 
 import (
+	"flag"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/pebbe/zmq4"
@@ -9,6 +12,21 @@ import (
 //// Configurables
 const reqRespConnectionString string = "tcp://127.0.0.1:12125"
 const reqRespMessage string = "DERP"
+
+var (
+	cwd_arg = flag.String("cwd", "", "set cwd")
+)
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if *cwd_arg != "" {
+		if err := os.Chdir(*cwd_arg); err != nil {
+			fmt.Println("Chdir error:", err)
+		}
+	}
+
+	os.Exit(m.Run())
+}
 
 func TestAll(t *testing.T) {
 	cleanup, err := StartZeroMqComms()

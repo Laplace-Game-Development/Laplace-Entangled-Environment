@@ -23,7 +23,7 @@ var commandMap map[int64]policy.ClientCmd = map[int64]policy.ClientCmd{
 	0000 + 2: policy.CmdLogin,
 	1<<4 + 0: policy.CmdAction,
 	1<<4 + 1: policy.CmdObserve,
-	1<<5 + 0: policy.CmdGetUser,
+	1<<8 + 0: policy.CmdGetUser,
 	1<<9 + 0: policy.CmdGameCreate,
 	1<<9 + 1: policy.CmdGameJoin,
 	1<<9 + 2: policy.CmdGameLeave,
@@ -37,6 +37,8 @@ var commandMap map[int64]policy.ClientCmd = map[int64]policy.ClientCmd{
 func ParseCommand(mostSignificant byte, leastSignificant byte) (policy.ClientCmd, error) {
 	var cmd int64 = int64(mostSignificant)
 	cmd = (cmd << 8) + int64(leastSignificant)
+
+	log.Printf("Received Command: %d", cmd)
 
 	result, exists := commandMap[cmd]
 

@@ -1,8 +1,13 @@
 package util
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
 	"testing"
 )
 
@@ -14,6 +19,21 @@ const numberOfChars = 128
 
 // The Maximum Weight a random String Should See before failure
 const maxPercentWeight = 20
+
+var (
+	cwd_arg = flag.String("cwd", "", "set cwd")
+)
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if *cwd_arg != "" {
+		if err := os.Chdir(*cwd_arg); err != nil {
+			fmt.Println("Chdir error:", err)
+		}
+	}
+
+	os.Exit(m.Run())
+}
 
 func TestClear(t *testing.T) {
 	bytes0 := []byte{'a', 'b', 'c', 'd', 'e'}
@@ -180,4 +200,67 @@ func TestRandStringN(t *testing.T) {
 			t.Errorf("Got too many of the same string!\nMap: %v\n", checkList)
 		}
 	}
+}
+
+func TestBatchReadConnection(t *testing.T) {
+	message := "This is a really long message with not EOT character!"
+	messageEOT := message + string(byte(4)) + "YOLOLOLOLO"
+
+	conn := TestReader{
+		msg: message,
+		eof: false,
+	}
+
+	var buf bytes.Buffer
+
+	io.Copy(&buf, &conn)
+
+	conn.eof = false
+	buf2, err := BatchReadConnection(&conn, byte(4), 512, 10)
+	if err != nil {
+		t.Errorf("Got Error From Batch Read! Err: %v\n", err)
+	}
+
+	expected := buf.String()
+	actual := string(buf2)
+
+	if expected != actual {
+		t.Errorf("Expected did not match actual! Expected: %s | Actual %s\n", expected, actual)
+	}
+
+	conn = TestReader{
+		msg: messageEOT,
+		eof: false,
+	}
+
+	buf2, err = BatchReadConnection(&conn, byte(4), 512, 10)
+	if err != nil {
+		t.Errorf("Got Error From Batch Read! Err: %v\n", err)
+	}
+
+	actual = string(buf2)
+
+	if expected != actual {
+		t.Errorf("Expected did not match actual! Expected: %s | Actual %s\n", expected, actual)
+	}
+}
+
+type TestReader struct {
+	msg string
+	eof bool
+}
+
+func (reader *TestReader) Read(b []byte) (int, error) {
+	if !reader.eof {
+		reader.eof = true
+	} else {
+		return 0, io.EOF
+	}
+
+	bytes := []byte(reader.msg)
+	length := len(bytes)
+	for i := 0; i < length; i++ {
+		b[i] = bytes[i]
+	}
+	return length, nil
 }

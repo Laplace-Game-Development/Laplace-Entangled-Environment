@@ -1,8 +1,10 @@
 package schedule
 
 import (
+	"flag"
 	"fmt"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
@@ -15,6 +17,21 @@ import (
 
 //// Configurables
 const eventHealthRecNum int = 10
+
+var (
+	cwd_arg = flag.String("cwd", "", "set cwd")
+)
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if *cwd_arg != "" {
+		if err := os.Chdir(*cwd_arg); err != nil {
+			fmt.Println("Chdir error:", err)
+		}
+	}
+
+	os.Exit(m.Run())
+}
 
 func TestStartupAndCleanup(t *testing.T) {
 	cleanup, err := StartCronScheduler()

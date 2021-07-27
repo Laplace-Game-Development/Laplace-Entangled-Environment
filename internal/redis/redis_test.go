@@ -1,7 +1,9 @@
 package redis
 
 import (
+	"flag"
 	"fmt"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -19,6 +21,21 @@ const MultiHSetTestFieldC string = "C"
 const AtomicTestIterations int = 100
 
 var MultiHSetTestIDs []string = []string{"1", "2", "3"}
+
+var (
+	cwd_arg = flag.String("cwd", "", "set cwd")
+)
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if *cwd_arg != "" {
+		if err := os.Chdir(*cwd_arg); err != nil {
+			fmt.Println("Chdir error:", err)
+		}
+	}
+
+	os.Exit(m.Run())
+}
 
 func TestStartDatabase(t *testing.T) {
 	cleanup, err := StartDatabase()
