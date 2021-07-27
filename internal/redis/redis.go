@@ -20,20 +20,19 @@ const RedisKeyMax int = 512000000
 //// Global Variables | Singletons
 
 // Global Reference for Redis -- Threadsafe
-var MasterRedis radix.Client = nil
+var MainRedis radix.Client = nil
 
 // ServerTask Startup Function for Redis Database. Takes care of initialization.
 func StartDatabase() (func(), error) {
-
 	// Ah yes! A Thread safe pool implementation. PERRRRFECT
 	pool, err := radix.NewPool("tcp", RedisIpAddress+RedisPortNumber, 10)
 	if err != nil {
 		return nil, err
 	}
 
-	MasterRedis = pool
+	MainRedis = pool
 
-	err = MasterRedis.Do(radix.Cmd(log.Writer(), "PING", "REDIS HAS BEEN PINGED!\n"))
+	err = MainRedis.Do(radix.Cmd(log.Writer(), "PING", "REDIS HAS BEEN PINGED!\n"))
 	if err != nil {
 		return nil, err
 	}
@@ -44,5 +43,5 @@ func StartDatabase() (func(), error) {
 // CleanUp Function returned by Startup function. Closes the Redis Client
 func cleanUpDatabase() {
 	log.Println("Cleaning Up Database Logic")
-	MasterRedis.Close()
+	MainRedis.Close()
 }

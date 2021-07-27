@@ -8,6 +8,7 @@ package policy
 
 import (
 	"encoding/json"
+	"reflect"
 	"time"
 )
 
@@ -16,6 +17,10 @@ import (
 // The amount of time a game can go without an action for. If nothing occurs
 // for x time on a game then it should be deleted
 const StaleGameDuration time.Duration = time.Duration(time.Minute * 5)
+
+// UserID For Request Made From the Server rather than
+// from a user. Useful for papertrails.
+const SuperUserID string = "-1"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
@@ -69,6 +74,18 @@ type RequestBodyFactories struct {
 	ParseFactory func(ptr interface{}) error
 
 	SigVerify func(userID string, userSig string) error
+}
+
+// Required Fields for any connection
+// see calculateResponse
+// or see switchOnCommand
+//
+// The structure is wrapped for easy of returning from a
+// constructing function.
+type InternalUserRequest struct {
+	Header             RequestHeader
+	BodyFactories      RequestBodyFactories
+	IsSecureConnection bool
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -238,4 +255,74 @@ func RawUnsuccessfulResponse(err string) CommandResponse {
 		UseRaw: true,
 		Raw:    []byte(err),
 	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+////
+//// Internal Request Functions
+////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Function to construct internal request with from a "Super User". Useful for
+// using endpoints with a specific papertrail. Super Users have a lot
+// more privaledges in checks than other users, but they can do this because
+// they skip the parsing steps. SigVerify automatically returns a nil error.
+// This could(/should) never happen from outside the system.
+//
+// isTask :: true if task is making the request and false otherwise
+//      (old parameter and not necessary)
+// cmd    :: Selected Endpoint to be requested
+// args   :: struct to use for args for endpoint
+// returns -> InternalUserRequest struct for making the request.
+func RequestWithSuperUser(isTask bool, cmd ClientCmd, args interface{}) (InternalUserRequest, error) {
+	// shortcut bodyfactory using reflection
+	bodyFactories := RequestBodyFactories{
+		ParseFactory: func(ptr interface{}) error {
+			ptrValue := reflect.ValueOf(ptr)
+			argsVal := reflect.ValueOf(args)
+			ptrValue.Elem().Set(argsVal)
+			return nil
+		},
+		SigVerify: func(userID string, userSig string) error {
+			return nil
+		},
+	}
+
+	// Body Start is only used in main.go and is not necessary for a manual request command
+	header := RequestHeader{Command: cmd, UserID: SuperUserID}
+
+	return InternalUserRequest{Header: header, BodyFactories: bodyFactories, IsSecureConnection: true}, nil
+}
+
+// Function to construct internal request with from a given user.
+// Used for unit testing
+//
+// userID :: String User ID for Database
+// isTask :: true if task is making the request and false otherwise
+//      (old parameter and not necessary)
+// cmd    :: Selected Endpoint to be requested
+// args   :: struct to use for args for endpoint
+// returns -> InternalUserRequest struct for making the request.
+func RequestWithUserForTesting(userID string, isTask bool, cmd ClientCmd, args interface{}) (InternalUserRequest, error) {
+	// shortcut bodyfactory using reflection
+	bodyFactories := RequestBodyFactories{
+		ParseFactory: func(ptr interface{}) error {
+			if args == nil {
+				return nil
+			}
+
+			ptrValue := reflect.ValueOf(ptr)
+			argsVal := reflect.ValueOf(args)
+			ptrValue.Elem().Set(argsVal)
+			return nil
+		},
+		SigVerify: func(userID string, userSig string) error {
+			return nil
+		},
+	}
+
+	// Body Start is only used in main.go and is not necessary for a manual request command
+	header := RequestHeader{Command: cmd, UserID: userID}
+
+	return InternalUserRequest{Header: header, BodyFactories: bodyFactories, IsSecureConnection: true}, nil
 }

@@ -117,7 +117,7 @@ func executeCommand() {
 //                to the game.
 func BytesToGame(dataIn string) (string, error) {
 	// Create a Zeromq Request Port
-	req, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
+	req, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +219,7 @@ func ApplyAction(header policy.RequestHeader, bodyFactories policy.RequestBodyFa
 
 	// 4. Load Game State Data
 	var state string
-	err = redis.MasterRedis.Do(radix.Cmd(&state, "HGET", GameHashSetName, args.GameID))
+	err = redis.MainRedis.Do(radix.Cmd(&state, "HGET", GameHashSetName, args.GameID))
 	if err != nil || len(state) <= 0 {
 		return policy.RespWithError(err)
 	}
@@ -248,7 +248,7 @@ func ApplyAction(header policy.RequestHeader, bodyFactories policy.RequestBodyFa
 
 	// 6. On Success update metadata
 	milli := fmt.Sprintf("%d", time.Now().UTC().Unix())
-	err = redis.MasterRedis.Do(radix.Cmd(nil, "HSET", MetadataSetPrefix+args.GameID, MetadataSetLastUsed, milli))
+	err = redis.MainRedis.Do(radix.Cmd(nil, "HSET", MetadataSetPrefix+args.GameID, MetadataSetLastUsed, milli))
 	if err != nil {
 		log.Printf("A Server Error Occurred: %v\n", err)
 	}
@@ -287,7 +287,7 @@ func GetGameData(header policy.RequestHeader, bodyFactories policy.RequestBodyFa
 
 	// 3. Load Game State Data
 	var state string
-	err = redis.MasterRedis.Do(radix.Cmd(&state, "HGET", GameHashSetName, args.GameID))
+	err = redis.MainRedis.Do(radix.Cmd(&state, "HGET", GameHashSetName, args.GameID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if len(state) <= 0 {

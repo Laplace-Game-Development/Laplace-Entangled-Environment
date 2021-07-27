@@ -1,5 +1,5 @@
 # Laplace-Entangled-Environment
-A out of the box backend service for games to create a client-based multiplayer game. Write the code once then spread it to other players without much knowledge of networking. 
+An out of the box backend service for games to create a client-based multiplayer game. Write the code once then spread it to other players without much knowledge of networking. 
 
 ## Setting Up The Project
 - Install GO
@@ -21,8 +21,15 @@ The application will support running of different binaries to communicate with. 
 `go run ./cmd/main.go` will run the application
 
 ## Testing the Project
-`go test ./...` will run all tests associated with the application
+This will run all tests associated with the application in the present working directory
+- For Windows: `go test ./... -v -args -cwd="%cd%"`
+- For Linux/OSX: `go test ./... -v -args -cwd="$PWD"`
 
-## Refreshing Documentation for Project
+## Documentation
+
+### Refreshing Documentation for Project
 - For Windows: `gendoc.bat`
 - For Linux/OSX: `gendoc.sh`
+
+### pkg.go.dev
+[Laplace-Entangled-Environment](https://pkg.go.dev/github.com/Laplace-Game-Development/Laplace-Entangled-Environment)

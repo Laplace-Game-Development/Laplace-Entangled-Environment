@@ -11,28 +11,33 @@ import (
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/data"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/event"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
-	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/route"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/zeromq"
+	"github.com/mediocregopher/radix/v3"
 	"github.com/pebbe/zmq4"
 )
 
 //// Configurables
 
 // Number of Workers to Distribute to with ZeroMQ
-const NumberOfTaskWorkers uint8 = 5
+const NumberOfTaskWorkers uint8 = 10
 
 // Proxy Publish Port for sending to (application)
-const ProxyPubPort string = ":5565"
+const ProxyFEPort string = ":5565"
 
 // Proxy Sub Port for receiving From (workers)
-const ProxySubPort string = ":5566"
+const ProxyBEPort string = ":5566"
 
 // Proxy Control Port for Interrupting Proxy
 const ProxyControlPort string = ":5567"
 
 // Time that a Worker should sleep/wait in the event
 // of no tasks being ready
-const EmptyQueueSleepDuration time.Duration = time.Duration(time.Minute)
+const EmptyQueueSleepDuration time.Duration = time.Duration(time.Second * time.Duration(NumberOfTaskWorkers))
+
+// Time that a worker should spend waiting to receive
+// for new work
+const RecvIOTimeoutDuration time.Duration = time.Duration(time.Microsecond)
 
 // Number of Event Health Tasks to pop off of redis
 // Maybe this should be in schedule.go
@@ -48,10 +53,10 @@ const MagicRune rune = '~'
 // Game Health Checking to garbage collect game data
 const HealthTaskPrefix string = "healthTask"
 
-//// Global Variables | Singletons
+// Unit Testing Prefix for adding to the database using workers
+const TestTaskPrefix string = "unitTest0"
 
-// Control Referency For Proxy Control Port
-var zeroMQProxyControl *zmq4.Socket = nil
+//// Global Variables | Singletons
 
 // Control Communication for Workers Input
 // Used For Cleanup
@@ -77,17 +82,6 @@ func StartTaskQueue() (func(), error) {
 
 	if !response {
 		return nil, errors.New("Could not Start Proxy (Check Logs!)")
-	}
-
-	// Set a Control
-	zeroMQProxyControl, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.PUB))
-	if err != nil {
-		return nil, err
-	}
-
-	err = zeroMQProxyControl.Bind(zeromq.ZeromqMask + ProxyControlPort)
-	if err != nil {
-		return nil, err
 	}
 
 	// TODO Buffer to numberOfTaskWorkers
@@ -117,6 +111,24 @@ func cleanUpTaskQueue() {
 	}
 
 	log.Println("Task Workers Cleanup Complete!")
+
+	log.Println("Clearing Proxy")
+
+	// Set a Control
+	zeroMQProxyControl, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
+	if err != nil {
+		log.Fatalf("Error Clearing Proxy! Err: %v\n", err)
+	}
+
+	err = zeroMQProxyControl.Bind(zeromq.ZeromqMask + ProxyControlPort)
+	if err != nil {
+		log.Fatalf("Error Clearing Proxy! Err: %v\n", err)
+	}
+
+	zeroMQProxyControl.Send("TERMINATE", zmq4.Flag(0))
+	zeroMQProxyControl.Recv(zmq4.Flag(0))
+
+	log.Println("Clearing Proxy Complete!")
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -125,8 +137,9 @@ func cleanUpTaskQueue() {
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Starts the Proxy Communication Layer. The Application communicates to this
-// block the tasks and data that need to be worked on. The Proxy then distributes
+// Starts the Proxy Communication Layer for a 0MQ Queue Device.
+// The Application communicates to this block the tasks and data that need
+// to be worked on. The Proxy then distributes
 // the data using ZeroMQ's distribution algorithms.
 //
 // resp :: boolean channel which is used to return success/failure
@@ -134,15 +147,15 @@ func cleanUpTaskQueue() {
 //
 // Should be called in a goroutine otherwise zmq_proxy will block the main "thread"
 func startAsynchronousProxy(resp chan bool) {
-	// Worker-Facing Publisher
-	zmqXPUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.XPUB))
+	// Worker-Facing Publisher/ROUTER
+	zmqXREP, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.ROUTER))
 	if err != nil {
 		log.Println(err)
 		resp <- false
 		return
 	}
 
-	err = zmqXPUB.Bind(zeromq.ZeromqMask + ProxyPubPort)
+	err = zmqXREP.Bind(zeromq.ZeromqMask + ProxyFEPort)
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -150,14 +163,14 @@ func startAsynchronousProxy(resp chan bool) {
 	}
 
 	// Callsite socket
-	zmqXSUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.XSUB))
+	zmqXREQ, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.DEALER))
 	if err != nil {
 		log.Println(err)
 		resp <- false
 		return
 	}
 
-	err = zmqXSUB.Bind(zeromq.ZeromqMask + ProxySubPort)
+	err = zmqXREQ.Bind(zeromq.ZeromqMask + ProxyBEPort)
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -165,7 +178,9 @@ func startAsynchronousProxy(resp chan bool) {
 	}
 
 	// Interrupt socket
-	zmqCON, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.SUB))
+	// Use a Router here for STATISTICS as a potential return rather than
+	// documentation's reported SUB socket.
+	zmqCON, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.REP))
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -179,21 +194,21 @@ func startAsynchronousProxy(resp chan bool) {
 		return
 	}
 
-	err = zmqCON.SetSubscribe("")
-	if err != nil {
-		log.Println(err)
-		resp <- false
-		return
-	}
-
 	resp <- true
 
 	// Will Run Forever
-	err = zmq4.ProxySteerable(zmqXSUB, zmqXPUB, nil, zmqCON)
+	err = zmq4.ProxySteerable(zmqXREQ, zmqXREP, nil, zmqCON)
 	if err != nil {
-		log.Fatal(err)
-		return
+		// This cannot be Fatal otherwise test will fail
+		log.Printf("Proxy Ended with Error! Err: %v\n", err)
 	}
+
+	log.Println("Proxy Signaled To Be Terminated!")
+	zmqCON.Send("OK", zmq4.Flag(0))
+
+	zmqXREQ.Close()
+	zmqXREP.Close()
+	zmqCON.Close()
 }
 
 // Starts a worker with the given ID. The worker receives and consumes
@@ -210,21 +225,21 @@ func startAsynchronousProxy(resp chan bool) {
 // This function should be run with a goroutine.
 func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan bool) {
 	// Startup
-	subSocket, err := zmq4.NewSocket(zmq4.Type(zmq4.SUB))
+	subSocket, err := zmq4.NewSocket(zmq4.Type(zmq4.REP))
 	if err != nil {
 		log.Printf("Could Not Start Task Worker! ID: %d\n", id)
 		log.Println(err)
 		return
 	}
 
-	err = subSocket.Connect(zeromq.ZeromqHost + ProxyPubPort)
+	err = subSocket.Connect(zeromq.ZeromqHost + ProxyBEPort)
 	if err != nil {
 		log.Printf("Could Not Start Task Worker! ID: %d\n", id)
 		log.Println(err)
 		return
 	}
 
-	err = subSocket.SetRcvtimeo(time.Duration(time.Microsecond * 30))
+	err = subSocket.SetRcvtimeo(time.Duration(time.Second))
 	if err != nil {
 		log.Printf("Could Not Start Task Worker! ID: %d\n", id)
 		log.Println(err)
@@ -244,12 +259,16 @@ func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan boo
 			log.Printf("Cleaning Up Thread ID: %d\n", id)
 			return
 		} else {
+			subSocket.Send("OK", zmq4.DONTWAIT)
 			onTask(msg)
+			subSocket.Send("DONE", zmq4.DONTWAIT)
 		}
 
 		select {
 		case <-signalChannel:
 			responseChannel <- true
+			log.Printf("Cleaning Up Thread ID: %d\n", id)
+			subSocket.Close()
 			return
 		default:
 		}
@@ -271,29 +290,58 @@ func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan boo
 //
 // Returns an Error if communicating fails (server-shutoff or the full message could
 // not be sent).
-func sendTasksToWorkers(msgs []string) error {
+func SendTasksToWorkers(msgs ...string) error {
 	// Proxy Facing Publisher
-	zmqPUB, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.PUB))
+	zmqREQ, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.DEALER))
 	if err != nil {
 		return err
 	}
 
-	err = zmqPUB.Connect(zeromq.ZeromqHost + ProxySubPort)
+	log.Println("Connecting to Worker Proxy!")
+	err = zmqREQ.Connect(zeromq.ZeromqHost + ProxyFEPort)
 	if err != nil {
 		return err
 	}
 
+	count := 0
 	for _, msg := range msgs {
-		// We May Possibly Not Want To Wait Here
-		num, err := zmqPUB.Send(msg, zmq4.Flag(0))
+		if len(msg) == 0 {
+			break
+		}
+
+		if count > 0 {
+			time.Sleep(time.Second)
+		}
+
+		log.Println("Sending Delimitter")
+		_, err := zmqREQ.Send("", zmq4.SNDMORE)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("Sending Message: %s\n", msg)
+		num, err := zmqREQ.Send(msg, zmq4.Flag(0))
 		if err != nil {
 			return err
 		} else if len(msg) != num {
 			return errors.New("ZeroMQ did not Accept Full Job! Characters Accepted:" + fmt.Sprintf("%d", num))
 		}
+
+		count += 1
 	}
 
-	err = zmqPUB.Close()
+	log.Println("Waiting for Confirmations")
+	for i := 0; i < count; i++ {
+		_, err = zmqREQ.Recv(zmq4.Flag(0))
+		if err != nil {
+			return err
+		}
+		log.Printf("Confirmation Received!")
+	}
+	log.Println("Received all Confirmations")
+
+	log.Println("Closing connection to Worker Proxy!")
+	err = zmqREQ.Close()
 	if err != nil {
 		return err
 	}
@@ -311,6 +359,7 @@ func sendTasksToWorkers(msgs []string) error {
 // required data to call a function in the event module. These are called and used by workers.
 var mapPrefixToWork map[string]func([]string) error = map[string]func([]string) error{
 	HealthTaskPrefix: healthTaskWork,
+	TestTaskPrefix:   testTaskWork,
 }
 
 // Parses the given message and runs the associated function based on "mapPrefixToWork"
@@ -350,7 +399,7 @@ func healthTaskWork(args []string) error {
 	}
 
 	if gameTime.Add(policy.StaleGameDuration).Before(time.Now().UTC()) {
-		superUserRequest, err := route.RequestWithSuperUser(true, policy.CmdGameDelete, data.SelectGameArgs{GameID: args[0]})
+		superUserRequest, err := policy.RequestWithSuperUser(true, policy.CmdGameDelete, data.SelectGameArgs{GameID: args[0]})
 		if err != nil {
 			return err
 		}
@@ -367,6 +416,22 @@ func healthTaskWork(args []string) error {
 	return nil
 }
 
+// Adds a given set of arguments to the redis database for testing
+//
+// args:: the data from the msg
+// args[0] :: redis Set Key
+// args[1] :: string value
+//
+// Only For Unit Testing
+func testTaskWork(args []string) error {
+	if len(args) < 2 {
+		return errors.New("Task Did Not Receive Set Key and Value!")
+	}
+
+	log.Printf("Unit Test Work Running!\nAdding %s to %s\n", args[0], args[1])
+	return redis.MainRedis.Do(radix.Cmd(nil, "SADD", args[0], args[1]))
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
 //// Tasks Utility Functions -- Functions that help when creating and submitting tasks
@@ -375,7 +440,7 @@ func healthTaskWork(args []string) error {
 
 // Constructs a string by joining the prefix and args with magic runes
 // i.e. result = prefix + MagicRune + arg0 + MagicRune + arg1 + [MagicRune + argN] ...
-func constructTaskWithPrefix(prefix string, args []string) string {
+func constructTaskWithPrefix(prefix string, args ...string) string {
 	var builder strings.Builder
 
 	builder.WriteString(prefix)

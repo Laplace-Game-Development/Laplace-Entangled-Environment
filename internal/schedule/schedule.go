@@ -32,7 +32,7 @@ var initialCronLedger []CronEvent = []CronEvent{
 
 // Cron scheduling reference. This should only be used by this module.
 // if you want to dynamically schedule (for whatever reason) use this
-var masterCron *cron.Cron = nil
+var mainCronInst *cron.Cron = nil
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ////
@@ -54,7 +54,7 @@ func StartCronScheduler() (func(), error) {
 // errors that occur when doing so.
 func cleanUpCronScheduler() {
 	log.Println("Cleaning Cron Jobs!")
-	ctx := masterCron.Stop()
+	ctx := mainCronInst.Stop()
 	select {
 	case <-ctx.Done():
 		log.Println(ctx.Err())
@@ -67,10 +67,10 @@ func cleanUpCronScheduler() {
 // "initialCronLedger" and adds each entry to the Cron scheduling reference.
 // It also intitializes the Cron scheduling instance.
 func initialSchedule() error {
-	masterCron = cron.New(cron.WithSeconds())
+	mainCronInst = cron.New(cron.WithSeconds())
 
 	for i, cronEvent := range initialCronLedger {
-		_, err := masterCron.AddFunc(cronEvent.Schedule, cronEvent.Event)
+		_, err := mainCronInst.AddFunc(cronEvent.Schedule, cronEvent.Event)
 		if err != nil {
 			log.Printf("Error Reached at Cron Event Index: %d\n", i)
 			return err
@@ -93,7 +93,12 @@ func eventCheckHealth() {
 	gameIDSlice := make([]string, EventHealthTaskCapacity)
 	gameIDSlicePrefixed := make([]string, EventHealthTaskCapacity)
 
-	err := redis.MasterRedis.Do(radix.Cmd(&gameIDSlice, "LPOP", event.HealthTaskQueue, fmt.Sprintf("%d", EventHealthTaskCapacity)))
+	err := redis.MainRedis.Do(radix.Cmd(&gameIDSlice, "LRANGE", event.HealthTaskQueue, "0", fmt.Sprintf("%d", EventHealthTaskCapacity-1)))
+	if err != nil {
+		log.Fatalln("Trouble Using Health Event: " + err.Error())
+	}
+
+	err = redis.MainRedis.Do(radix.Cmd(nil, "LTRIM", event.HealthTaskQueue, fmt.Sprintf("%d", EventHealthTaskCapacity), "-1"))
 	if err != nil {
 		log.Fatalln("Trouble Using Health Event: " + err.Error())
 	}
@@ -102,14 +107,11 @@ func eventCheckHealth() {
 		return
 	}
 
-	temp := make([]string, 1)
-
 	for i, s := range gameIDSlice {
-		temp[0] = s
-		gameIDSlicePrefixed[i] = constructTaskWithPrefix(HealthTaskPrefix, temp)
+		gameIDSlicePrefixed[i] = constructTaskWithPrefix(HealthTaskPrefix, s)
 	}
 
-	err = sendTasksToWorkers(gameIDSlicePrefixed)
+	err = SendTasksToWorkers(gameIDSlicePrefixed...)
 	if err != nil {
 		log.Fatalf("Trouble Using Health Event! Error: %v", err.Error())
 	}

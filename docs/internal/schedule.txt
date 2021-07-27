@@ -27,7 +27,7 @@ const NumberOfTaskWorkers uint8 = 5
 const ProxyControlPort string = ":5567"
     Proxy Control Port for Interrupting Proxy
 
-const ProxyPubPort string = ":5565"
+const ProxyFEPort string = ":5565"
     Proxy Publish Port for sending to (application)
 
 const ProxySubPort string = ":5566"
@@ -49,7 +49,7 @@ var mapPrefixToWork map[string]func([]string) error = map[string]func([]string) 
     which load the required data to call a function in the event module. These
     are called and used by workers.
 
-var masterCron *cron.Cron = nil
+var mainCronInst *cron.Cron = nil
     Cron scheduling reference. This should only be used by this module. if you
     want to dynamically schedule (for whatever reason) use this
 

@@ -1,7 +1,9 @@
 package redis
 
 import (
+	"flag"
 	"fmt"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -19,6 +21,21 @@ const MultiHSetTestFieldC string = "C"
 const AtomicTestIterations int = 100
 
 var MultiHSetTestIDs []string = []string{"1", "2", "3"}
+
+var (
+	cwd_arg = flag.String("cwd", "", "set cwd")
+)
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if *cwd_arg != "" {
+		if err := os.Chdir(*cwd_arg); err != nil {
+			fmt.Println("Chdir error:", err)
+		}
+	}
+
+	os.Exit(m.Run())
+}
 
 func TestStartDatabase(t *testing.T) {
 	cleanup, err := StartDatabase()
@@ -39,10 +56,10 @@ func TestStartDatabase(t *testing.T) {
 // NOTE: This test starts with a lowercase letter because it is a subtest
 func testPingPong(t *testing.T) {
 	var message string
-	err := MasterRedis.Do(radix.Cmd(&message, "PING"))
+	err := MainRedis.Do(radix.Cmd(&message, "PING", "THIS IS A TEST!"))
 	if err != nil {
 		t.Errorf("Redis Could Not Be Pinged! Err: %v\n", err)
-	} else if message != "PONG" {
+	} else if message != "THIS IS A TEST!" {
 		t.Errorf("Did not recieve PONG from PING! Message: %s\n", message)
 	}
 }
@@ -51,12 +68,12 @@ func testAtomicCounter(t *testing.T) {
 	var result int
 	counter := 0
 	var counterNext int
-	err := MasterRedis.Do(radix.Cmd(nil, "DEL", AtomicTestKey))
+	err := MainRedis.Do(radix.Cmd(nil, "DEL", AtomicTestKey))
 	if err != nil {
 		t.Errorf("Could Not Delete Key %s. Err: %v\n", AtomicTestKey, err)
 	}
 
-	err = MasterRedis.Do(radix.Cmd(&result, "SETNX", AtomicTestKey,
+	err = MainRedis.Do(radix.Cmd(&result, "SETNX", AtomicTestKey,
 		fmt.Sprintf("%d", counter)))
 
 	if err != nil {
@@ -66,7 +83,7 @@ func testAtomicCounter(t *testing.T) {
 	}
 
 	for i := 0; i < AtomicTestIterations; i++ {
-		err = MasterRedis.Do(radix.Cmd(&counterNext, "INCR", AtomicTestKey))
+		err = MainRedis.Do(radix.Cmd(&counterNext, "INCR", AtomicTestKey))
 		if err != nil {
 			t.Errorf("Could Not Increment Key %s. Err: %v\n", AtomicTestKey, err)
 		} else if counterNext <= counter || (counter == (^0) && counterNext == 0) {
@@ -74,7 +91,7 @@ func testAtomicCounter(t *testing.T) {
 		}
 	}
 
-	err = MasterRedis.Do(radix.Cmd(nil, "DEL", AtomicTestKey))
+	err = MainRedis.Do(radix.Cmd(nil, "DEL", AtomicTestKey))
 	if err != nil {
 		t.Errorf("Could Not Delete Key %s. Err: %v\n", AtomicTestKey, err)
 	}
@@ -90,14 +107,14 @@ func testCardinality(t *testing.T) {
 		"lol":  true,
 	}
 
-	err := MasterRedis.Do(radix.Cmd(nil, "DEL", CardinalityTestKey))
+	err := MainRedis.Do(radix.Cmd(nil, "DEL", CardinalityTestKey))
 	if err != nil {
 		t.Errorf("Could Not Delete Key %s. Err: %v\n", CardinalityTestKey, err)
 	}
 
 	count := 0
 	for key := range hashSet {
-		err = MasterRedis.Do(radix.Cmd(&result, "SADD", CardinalityTestKey, key))
+		err = MainRedis.Do(radix.Cmd(&result, "SADD", CardinalityTestKey, key))
 		if err != nil {
 			t.Errorf("Could Not SADD to Key %s. Err: %v\n", CardinalityTestKey, err)
 		} else if result == 0 {
@@ -109,7 +126,7 @@ func testCardinality(t *testing.T) {
 
 	// Do It Again to Show Cardinality
 	for key := range hashSet {
-		err = MasterRedis.Do(radix.Cmd(&result, "SADD", CardinalityTestKey, key))
+		err = MainRedis.Do(radix.Cmd(&result, "SADD", CardinalityTestKey, key))
 		if err != nil {
 			t.Errorf("Could Not SADD to Key %s. Err: %v\n", CardinalityTestKey, err)
 		} else if result != 0 {
@@ -117,14 +134,14 @@ func testCardinality(t *testing.T) {
 		}
 	}
 
-	err = MasterRedis.Do(radix.Cmd(&cardinality, "SCARD", CardinalityTestKey))
+	err = MainRedis.Do(radix.Cmd(&cardinality, "SCARD", CardinalityTestKey))
 	if err != nil {
 		t.Errorf("Could Not SADD to Key %s. Err: %v\n", CardinalityTestKey, err)
 	} else if cardinality != count {
 		t.Errorf("Result From Cardinality != Count.\n %d != %d\n", cardinality, count)
 	}
 
-	err = MasterRedis.Do(radix.Cmd(nil, "DEL", CardinalityTestKey))
+	err = MainRedis.Do(radix.Cmd(nil, "DEL", CardinalityTestKey))
 	if err != nil {
 		t.Errorf("Could Not Delete Key %s. Err: %v\n", CardinalityTestKey, err)
 	}
@@ -141,7 +158,7 @@ func testMultiHSet(t *testing.T) {
 
 	// Cleanup Before
 	for _, val := range MultiHSetTestIDs {
-		err = MasterRedis.Do(radix.Cmd(nil, "DEL", MultiHSetTestPrefix+val))
+		err = MainRedis.Do(radix.Cmd(nil, "DEL", MultiHSetTestPrefix+val))
 		if err != nil {
 			t.Errorf("Could Not Delete Key %s. Err: %v\n", MultiHSetTestPrefix+val, err)
 		}
@@ -151,7 +168,7 @@ func testMultiHSet(t *testing.T) {
 		expected = "foo" + val
 		expectedMilli = time.Now().UTC().Unix()
 
-		err = MasterRedis.Do(radix.Cmd(nil, "HSET", MultiHSetTestPrefix+val,
+		err = MainRedis.Do(radix.Cmd(nil, "HSET", MultiHSetTestPrefix+val,
 			MultiHSetTestFieldA, expected,
 			MultiHSetTestFieldB, "bar",
 			MultiHSetTestFieldC, fmt.Sprintf("%d", expectedMilli)))
@@ -160,7 +177,7 @@ func testMultiHSet(t *testing.T) {
 			t.Errorf("Could Set Fields %s. Err: %v\n", MultiHSetTestPrefix+val, err)
 		}
 
-		err = MasterRedis.Do(radix.Cmd(&result, "HGET", MultiHSetTestPrefix+val, MultiHSetTestFieldA))
+		err = MainRedis.Do(radix.Cmd(&result, "HGET", MultiHSetTestPrefix+val, MultiHSetTestFieldA))
 		if err != nil {
 			t.Errorf("Could Not Gather Field For Set: %s Field %s! Err: %v\n", MultiHSetTestPrefix+val, MultiHSetTestFieldA, err)
 		} else if result != expected {
@@ -168,21 +185,21 @@ func testMultiHSet(t *testing.T) {
 		}
 
 		expected = "foobar"
-		err = MasterRedis.Do(radix.Cmd(&success, "HSET", MultiHSetTestPrefix+val, MultiHSetTestFieldA, expected))
+		err = MainRedis.Do(radix.Cmd(&success, "HSET", MultiHSetTestPrefix+val, MultiHSetTestFieldA, expected))
 		if err != nil {
 			t.Errorf("Could Not Set Field For Set: %s Field %s! Err: %v\n", MultiHSetTestPrefix+val, MultiHSetTestFieldA, err)
 		} else if success == 1 {
 			t.Errorf("Changing a field value added a field. Field: %s New Value: %s\n", MultiHSetTestFieldA, expected)
 		}
 
-		err = MasterRedis.Do(radix.Cmd(&result, "HGET", MultiHSetTestPrefix+val, MultiHSetTestFieldA))
+		err = MainRedis.Do(radix.Cmd(&result, "HGET", MultiHSetTestPrefix+val, MultiHSetTestFieldA))
 		if err != nil {
 			t.Errorf("Could Not Gather Field For Set: %s Field %s! Err: %v\n", MultiHSetTestPrefix+val, MultiHSetTestFieldA, err)
 		} else if result != expected {
 			t.Errorf("The Result Did Not Match expected/Expected Value. Expected: %s != Actual: %s!\n", result, expected)
 		}
 
-		err = MasterRedis.Do(radix.Cmd(&results, "HMGET", MultiHSetTestPrefix+val,
+		err = MainRedis.Do(radix.Cmd(&results, "HMGET", MultiHSetTestPrefix+val,
 			MultiHSetTestFieldA,
 			MultiHSetTestFieldB,
 			MultiHSetTestFieldC))
@@ -202,7 +219,7 @@ func testMultiHSet(t *testing.T) {
 
 	// Cleanup After
 	for _, val := range MultiHSetTestIDs {
-		err = MasterRedis.Do(radix.Cmd(nil, "DEL", MultiHSetTestPrefix+val))
+		err = MainRedis.Do(radix.Cmd(nil, "DEL", MultiHSetTestPrefix+val))
 		if err != nil {
 			t.Errorf("Could Not Delete Key %s. Err: %v\n", MultiHSetTestPrefix+val, err)
 		}
