@@ -2,6 +2,7 @@ package route
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -53,10 +54,42 @@ func SigVerification(authID string, signature string, content *[]byte) error {
 	}
 
 	checksumByte := sha256.Sum256(input)
-	checksum := string(checksumByte[:])
+	checksum := base64.RawStdEncoding.EncodeToString(checksumByte[:])
+
 	if signature == checksum {
 		return data.IncrementTokenUses(authID, token.Uses)
 	}
 
 	return errors.New(fmt.Sprintf("Signature is Incorrect!: %s vs %s", signature, checksum))
+}
+
+func TestHelperGenSig(token *[]byte, content string, counter int) string {
+	counterString := fmt.Sprintf("%d", counter)
+
+	counterByte := []byte(counterString)
+	contentByte := []byte(content)
+
+	contentLen := len(contentByte)
+	tokenLen := len(*token)
+	counterLen := len(counterByte)
+
+	input := make([]byte, contentLen+tokenLen+counterLen)
+	err := util.Concat(&input, &contentByte, 0)
+	if err != nil {
+		return ""
+	}
+
+	err = util.Concat(&input, token, contentLen)
+	if err != nil {
+		return ""
+	}
+
+	err = util.Concat(&input, &counterByte, contentLen+tokenLen)
+	if err != nil {
+		return ""
+	}
+
+	checksumByte := sha256.Sum256(input)
+	checksum := base64.RawStdEncoding.EncodeToString(checksumByte[:])
+	return checksum
 }

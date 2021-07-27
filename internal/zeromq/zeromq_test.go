@@ -41,7 +41,7 @@ func TestAll(t *testing.T) {
 
 func testRequestResponse(t *testing.T) {
 	lock := make(chan bool)
-	resp, err := MasterZeroMQ.NewSocket(zmq4.REP)
+	resp, err := MainZeroMQ.NewSocket(zmq4.REP)
 	if err != nil {
 		t.Fatalf("Error Creating ZeroMQ Socket. Err: %v\n", err)
 	}
@@ -52,7 +52,7 @@ func testRequestResponse(t *testing.T) {
 		t.Fatalf("Error Binding ZeroMQ Socket. Err: %v\n", err)
 	}
 
-	req, err := MasterZeroMQ.NewSocket(zmq4.REQ)
+	req, err := MainZeroMQ.NewSocket(zmq4.REQ)
 	if err != nil {
 		t.Fatalf("Error Creating ZeroMQ Socket. Err: %v\n", err)
 	}

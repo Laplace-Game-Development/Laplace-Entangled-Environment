@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/base64"
 	"errors"
 	"io"
 	"log"
@@ -136,7 +137,6 @@ func BatchReadConnection(conn io.Reader, delimitter byte, batchSize int, batchMa
 		batchReadSize, err := conn.Read(batch)
 		batches[iterator] = &batch
 
-		log.Printf("Read %d Bytes\n", batchReadSize)
 		if batchReadSize > 0 {
 			delimIndex := getDelimIndex(&batch, delimitter, batchReadSize)
 			if delimIndex > -1 {
@@ -168,11 +168,30 @@ func resolveBatchReadConnection(batches [](*[]byte), batchSize int, lastReadSize
 	length := (batchSize * numberOfBatches) + lastReadSize
 	result := make([]byte, length)
 
-	log.Printf("Length: %d\n", length)
 	for iterator := 0; iterator < length; iterator += 1 {
-		log.Printf("Indexing %d with [%d][%d]\n", iterator, iterator/batchSize, iterator%batchSize)
 		result[iterator] = (*batches[iterator/batchSize])[iterator%batchSize]
 	}
 
 	return result, err
+}
+
+// Decodes the data byte slice from base64 and returns a new byte slice representing the data.
+//
+// data :: base64 encoded data
+// returns -> copy of the data which is base64 decoded
+func Base64Decode(data *[]byte) ([]byte, error) {
+	res := make([]byte, base64.RawStdEncoding.DecodedLen(len(*data)))
+	_, err := base64.RawStdEncoding.Decode(res, *data)
+	return res, err
+}
+
+// Encodes the data byte slice from base64 and returns a new byte slice representing the data.
+// Golang wants multiples of 3 when decoding so '=' is appended to the result for non-multiples of 3
+//
+// data :: data
+// returns -> copy of the data which is base64 decoded
+func Base64Encode(data *[]byte) []byte {
+	res := make([]byte, base64.RawStdEncoding.EncodedLen(len(*data)))
+	base64.RawStdEncoding.Encode(res, *data)
+	return res
 }

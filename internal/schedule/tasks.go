@@ -115,7 +115,7 @@ func cleanUpTaskQueue() {
 	log.Println("Clearing Proxy")
 
 	// Set a Control
-	zeroMQProxyControl, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
+	zeroMQProxyControl, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.REQ))
 	if err != nil {
 		log.Fatalf("Error Clearing Proxy! Err: %v\n", err)
 	}
@@ -148,7 +148,7 @@ func cleanUpTaskQueue() {
 // Should be called in a goroutine otherwise zmq_proxy will block the main "thread"
 func startAsynchronousProxy(resp chan bool) {
 	// Worker-Facing Publisher/ROUTER
-	zmqXREP, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.ROUTER))
+	zmqXREP, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.ROUTER))
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -163,7 +163,7 @@ func startAsynchronousProxy(resp chan bool) {
 	}
 
 	// Callsite socket
-	zmqXREQ, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.DEALER))
+	zmqXREQ, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.DEALER))
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -180,7 +180,7 @@ func startAsynchronousProxy(resp chan bool) {
 	// Interrupt socket
 	// Use a Router here for STATISTICS as a potential return rather than
 	// documentation's reported SUB socket.
-	zmqCON, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.REP))
+	zmqCON, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.REP))
 	if err != nil {
 		log.Println(err)
 		resp <- false
@@ -292,7 +292,7 @@ func startTaskWorker(id uint8, signalChannel chan bool, responseChannel chan boo
 // not be sent).
 func SendTasksToWorkers(msgs ...string) error {
 	// Proxy Facing Publisher
-	zmqREQ, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.DEALER))
+	zmqREQ, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.DEALER))
 	if err != nil {
 		return err
 	}
@@ -429,7 +429,7 @@ func testTaskWork(args []string) error {
 	}
 
 	log.Printf("Unit Test Work Running!\nAdding %s to %s\n", args[0], args[1])
-	return redis.MasterRedis.Do(radix.Cmd(nil, "SADD", args[0], args[1]))
+	return redis.MainRedis.Do(radix.Cmd(nil, "SADD", args[0], args[1]))
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

@@ -26,7 +26,7 @@ func TestStartUsers(t *testing.T) {
 	}
 
 	var passHashSaltTemp string
-	err := redis.MasterRedis.Do(radix.Cmd(&passHashSaltTemp, "GET", passHashSaltKey))
+	err := redis.MainRedis.Do(radix.Cmd(&passHashSaltTemp, "GET", passHashSaltKey))
 	if err != nil {
 		t.Errorf("Error Reading Redis Salt Value! Err: %v\n", err)
 	}
@@ -141,7 +141,7 @@ func TestGetUser(t *testing.T) {
 	authIDHold := getUserTestHelper(t, validUsername)
 	randomValue := "DERPITYDERP"
 
-	err := redis.MasterRedis.Do(radix.Cmd(nil, "HSET", UserAuthIDTable, validUsername, randomValue))
+	err := redis.MainRedis.Do(radix.Cmd(nil, "HSET", UserAuthIDTable, validUsername, randomValue))
 	if err != nil {
 		t.Errorf("Error in Setting Foobar Value in Database for GetUser! Err: %v\n", err)
 	}
@@ -152,7 +152,7 @@ func TestGetUser(t *testing.T) {
 		t.Fatalf("Expected AuthId is not AuthID! Expected: %s\tActual: %s\n", randomValue, actualAuthId)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(nil, "HSET", UserAuthIDTable, validUsername, authIDHold))
+	err = redis.MainRedis.Do(radix.Cmd(nil, "HSET", UserAuthIDTable, validUsername, authIDHold))
 	if err != nil {
 		t.Errorf("Error in Setting Foobar Value in Database for GetUser! Err: %v\n", err)
 	}
@@ -186,13 +186,13 @@ func createUserSuccess(t *testing.T, username string, password string) {
 
 	// Check User Exists in DB
 	var expectedID int
-	err = redis.MasterRedis.Do(radix.Cmd(&expectedID, "GET", AuthIDAtomicCounter))
+	err = redis.MainRedis.Do(radix.Cmd(&expectedID, "GET", AuthIDAtomicCounter))
 	if err != nil {
 		t.Errorf("Failure to checking user in DB! Err: %v\n", err)
 	}
 
 	var actualID int
-	err = redis.MasterRedis.Do(radix.Cmd(&actualID, "HGET", UserAuthIDTable, username))
+	err = redis.MainRedis.Do(radix.Cmd(&actualID, "HGET", UserAuthIDTable, username))
 	if err != nil {
 		t.Errorf("Failure to checking user in DB! Err: %v\n", err)
 	} else if expectedID != actualID {
@@ -200,7 +200,7 @@ func createUserSuccess(t *testing.T, username string, password string) {
 	}
 
 	var success int
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "EXISTS", fmt.Sprintf(AuthIDSetPrefix+"%d", actualID)))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "EXISTS", fmt.Sprintf(AuthIDSetPrefix+"%d", actualID)))
 	if err != nil {
 		t.Errorf("Failure to checking user in DB! Err: %v\n", err)
 	} else if success == 0 {

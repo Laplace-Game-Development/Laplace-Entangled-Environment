@@ -14,7 +14,7 @@ const ZeromqMask string = "tcp://*"
 
 VARIABLES
 
-var MasterZeroMQ *zmq4.Context = nil
+var MainZeroMQ *zmq4.Context = nil
     ZeroMQ Context Reference -- Defined on Startup
 
 

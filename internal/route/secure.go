@@ -2,7 +2,6 @@ package route
 
 import (
 	"crypto/tls"
-	"errors"
 	"log"
 
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
@@ -58,23 +57,6 @@ func StartEncryption() (func(), error) {
 // for consistency.
 func cleanUpEncryption() {
 	log.Println("Cleaning Up Encryption Logic")
-}
-
-// Secure the current TCP Listener connection. Return True if a new Connection was created
-// Return an error if somethign went wrong
-func SecureTCPConnIfNeeded(clientConn *TCPClientConn, prefix TCPRequestPrefix) (bool, error) {
-	if clientConn.isSecured || !prefix.NeedsSecurity {
-		return false, nil
-	}
-
-	newConn := tls.Server(clientConn.conn, &tlsConfig)
-	if newConn == nil {
-		return false, errors.New("newConn was nil!!! Something went wrong!")
-	}
-
-	clientConn.conn = newConn
-	clientConn.isSecured = true
-	return true, nil
 }
 
 // returns if the given command needs an encrypted connection or not

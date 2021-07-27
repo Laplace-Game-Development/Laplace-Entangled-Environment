@@ -22,7 +22,7 @@ func TestCreateDeleteRoom(t *testing.T) {
 	defer cleanup()
 
 	// Set To Max Atomic Count for overflow check
-	err := redis.MasterRedis.Do(radix.Cmd(nil, "SET", GameAtomicCounter, "9223372036854775806"))
+	err := redis.MainRedis.Do(radix.Cmd(nil, "SET", GameAtomicCounter, "9223372036854775806"))
 	if err != nil {
 		t.Errorf("Error Setting Game Atomic Counter to Max! %v\n", err)
 	}
@@ -144,7 +144,7 @@ func TestLeaveJoinGame(t *testing.T) {
 
 	// Check Stats In Tables are right!
 	var numPlayers int
-	err := redis.MasterRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+metadata.Id))
+	err := redis.MainRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+metadata.Id))
 	if err != nil {
 		t.Errorf("Redis Error checking Cardinality of Player Set! Err: %v\n", err)
 	} else if numPlayers != length-3 {
@@ -160,7 +160,7 @@ func TestLeaveJoinGame(t *testing.T) {
 	}
 
 	// Check Stats In Tables are right!
-	err = redis.MasterRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+metadata.Id))
+	err = redis.MainRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+metadata.Id))
 	if err != nil {
 		t.Errorf("Redis Error checking Cardinality of Player Set! Err: %v\n", err)
 	} else if numPlayers != 0 {

@@ -63,13 +63,13 @@ func TestEventHealthCheck(t *testing.T) {
 		check[fmt.Sprintf("%d", nums[i])] = false
 	}
 
-	err := redis.MasterRedis.Do(radix.Pipeline(cmds...))
+	err := redis.MainRedis.Do(radix.Pipeline(cmds...))
 	if err != nil {
 		t.Errorf("Error occurred in sendin records to Redis! Err: %v\n", err)
 	}
 
 	// Receive Records via Zeromq
-	zmqREP, err := zeromq.MasterZeroMQ.NewSocket(zmq4.Type(zmq4.REP))
+	zmqREP, err := zeromq.MainZeroMQ.NewSocket(zmq4.Type(zmq4.REP))
 	if err != nil {
 		t.Errorf("Error occured creating zeromq socket! Err: %v\n", err)
 	}

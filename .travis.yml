@@ -25,4 +25,4 @@ install:
 - openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out tlscert.crt -keyout tlskey.key -subj "/C=US/ST=California/L=Los Angeles/O=Laplace Game Development/CN=www.example.com"
 
 script:
-- go test ./... -v
+- go test ./... -v -args -cwd="$PWD"

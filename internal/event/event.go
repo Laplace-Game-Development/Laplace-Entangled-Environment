@@ -25,7 +25,7 @@ const HealthTaskQueue string = "healthTaskQueue"
 //
 // returns -> error if we are unable to submit the id to the database. nil otherwise.
 func SubmitGameForHealthCheck(gameID string) error {
-	err := redis.MasterRedis.Do(radix.Cmd(nil, "RPUSH", HealthTaskQueue, gameID))
+	err := redis.MainRedis.Do(radix.Cmd(nil, "RPUSH", HealthTaskQueue, gameID))
 	if err != nil {
 		return err
 	}

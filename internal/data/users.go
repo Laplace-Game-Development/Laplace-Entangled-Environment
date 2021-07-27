@@ -13,6 +13,7 @@ import (
 
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/policy"
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/redis"
+	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/util"
 	"github.com/mediocregopher/radix/v3"
 )
 
@@ -75,7 +76,7 @@ const TokenStaleTime time.Duration = time.Minute * 5
 // Loads The Password Salt from the Hash if it does not already exist
 func StartUsers() (func(), error) {
 	var passHashSaltTemp string
-	err := redis.MasterRedis.Do(radix.Cmd(&passHashSaltTemp, "GET", passHashSaltKey))
+	err := redis.MainRedis.Do(radix.Cmd(&passHashSaltTemp, "GET", passHashSaltKey))
 	if err != nil {
 		return nil, err
 	} else if passHashSaltTemp == "" {
@@ -86,7 +87,7 @@ func StartUsers() (func(), error) {
 		}
 
 		passHashSalt = string(byteTemp)
-		redis.MasterRedis.Do(radix.Cmd(nil, "SET", passHashSaltKey, passHashSalt))
+		redis.MainRedis.Do(radix.Cmd(nil, "SET", passHashSaltKey, passHashSalt))
 	} else {
 		passHashSalt = passHashSaltTemp
 	}
@@ -120,7 +121,11 @@ func Register(header policy.RequestHeader, bodyFactories policy.RequestBodyFacto
 	}
 
 	rqBody := RegisterCommandBody{}
-	bodyFactories.ParseFactory(&rqBody)
+	err := bodyFactories.ParseFactory(&rqBody)
+	if err != nil {
+		log.Printf("Bad Argument! Error: %v\n", err)
+		return policy.UnSuccessfulResponse("Bad Arguments!")
+	}
 
 	if rqBody.Username == "" {
 		return policy.RawUnsuccessfulResponse("Illegal Input!")
@@ -182,19 +187,19 @@ func CreateAccount(username string, password string) (bool, error) {
 	checksumHex := hex.EncodeToString(checksum[:])
 
 	// It should be noted, username could be encoded in any type of way.... it could be a mess of bytes... don't trust it on reads.
-	err := redis.MasterRedis.Do(radix.Cmd(&success, "HSETNX", UserPassTable, username, checksumHex))
+	err := redis.MainRedis.Do(radix.Cmd(&success, "HSETNX", UserPassTable, username, checksumHex))
 	if err != nil {
 		return false, err
 	} else if success == 0 {
 		return false, nil
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&newID, "INCR", AuthIDAtomicCounter))
+	err = redis.MainRedis.Do(radix.Cmd(&newID, "INCR", AuthIDAtomicCounter))
 	if err != nil {
 		return false, err
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "HSETNX", UserAuthIDTable, username, fmt.Sprintf("%d", newID)))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "HSETNX", UserAuthIDTable, username, fmt.Sprintf("%d", newID)))
 	if err != nil {
 		return false, err
 	} else if success == 0 {
@@ -202,7 +207,7 @@ func CreateAccount(username string, password string) (bool, error) {
 	}
 
 	// TODO We can add other fields here
-	err = redis.MasterRedis.Do(radix.Cmd(nil, "HSET", fmt.Sprintf(AuthIDSetPrefix+"%d", newID),
+	err = redis.MainRedis.Do(radix.Cmd(nil, "HSET", fmt.Sprintf(AuthIDSetPrefix+"%d", newID),
 		AuthIDSetUsernameField, username,
 		AuthIDSetTokenField, "",
 		AuthIDSetTokenStaleDateTimeField, fmt.Sprintf("0"),
@@ -220,26 +225,26 @@ func DeleteUser(username string) (bool, error) {
 	var authID int
 	var success int
 
-	err := redis.MasterRedis.Do(radix.Cmd(&success, "HDEL", UserPassTable, username))
+	err := redis.MainRedis.Do(radix.Cmd(&success, "HDEL", UserPassTable, username))
 	if err != nil {
 		return false, err
 	} else if success == 0 {
 		return false, nil
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&authID, "HGET", UserAuthIDTable, username))
+	err = redis.MainRedis.Do(radix.Cmd(&authID, "HGET", UserAuthIDTable, username))
 	if err != nil {
 		return false, err
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "HDEL", UserAuthIDTable, username))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "HDEL", UserAuthIDTable, username))
 	if err != nil {
 		return false, err
 	} else if success == 0 {
 		return false, errors.New("Could Not Delete Auth ID!")
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "DEL", fmt.Sprintf(AuthIDSetPrefix+"%d", authID)))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "DEL", fmt.Sprintf(AuthIDSetPrefix+"%d", authID)))
 	if err != nil {
 		return false, err
 	} else if success == 0 {
@@ -270,7 +275,11 @@ func Login(header policy.RequestHeader, bodyFactories policy.RequestBodyFactorie
 	}
 
 	rqBody := LoginCommandBody{}
-	bodyFactories.ParseFactory(&rqBody)
+	err := bodyFactories.ParseFactory(&rqBody)
+	if err != nil {
+		log.Printf("Bad Argument! Error: %v\n", err)
+		return policy.UnSuccessfulResponse("Bad Arguments!")
+	}
 
 	if !IsValidLogin(rqBody.Username, rqBody.Password) {
 		return policy.RawUnsuccessfulResponse("Illegal Input!")
@@ -286,7 +295,8 @@ func Login(header policy.RequestHeader, bodyFactories policy.RequestBodyFactorie
 		return policy.RespWithError(err)
 	}
 
-	return policy.RawSuccessfulResponseBytes(&token)
+	base64TokenBytes := util.Base64Encode(&token)
+	return policy.RawSuccessfulResponseBytes(&base64TokenBytes)
 }
 
 // Returns if the given login is valid or invalid based on
@@ -302,7 +312,7 @@ func IsValidLogin(username string, password string) bool {
 	reqChecksumHex := hex.EncodeToString(reqChecksum[:])
 	castedName := string(username)
 
-	err := redis.MasterRedis.Do(radix.Cmd(&actualChecksumHex, "HGET", UserPassTable, castedName))
+	err := redis.MainRedis.Do(radix.Cmd(&actualChecksumHex, "HGET", UserPassTable, castedName))
 	if err != nil {
 		log.Printf("Error in Loading Hash For User! Username: %s\n", username)
 		return false
@@ -321,7 +331,7 @@ func getAuthID(username string) (string, error) {
 	var authID string
 	castedName := string(username)
 
-	err := redis.MasterRedis.Do(radix.Cmd(&authID, "HGET", UserAuthIDTable, castedName))
+	err := redis.MainRedis.Do(radix.Cmd(&authID, "HGET", UserAuthIDTable, castedName))
 	if err != nil {
 		return "", err
 	}
@@ -352,10 +362,14 @@ type UserInfo struct {
 // and connecting other information.
 func GetUser(header policy.RequestHeader, bodyFactories policy.RequestBodyFactories, isSecureConnection bool) policy.CommandResponse {
 	rqBody := GetUserCommandBody{}
-	bodyFactories.ParseFactory(&rqBody)
+	err := bodyFactories.ParseFactory(&rqBody)
+	if err != nil {
+		log.Printf("Bad Argument! Error: %v\n", err)
+		return policy.UnSuccessfulResponse("Bad Arguments!")
+	}
 
 	var authID string
-	err := redis.MasterRedis.Do(radix.Cmd(&authID, "HGET", UserAuthIDTable, rqBody.Username))
+	err = redis.MainRedis.Do(radix.Cmd(&authID, "HGET", UserAuthIDTable, rqBody.Username))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if len(authID) <= 0 {
@@ -396,7 +410,7 @@ func ConstructNewToken(authID string) ([]byte, time.Time, error) {
 		return nil, staleDateTime, errors.New("rand.Read did not return full Token!")
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
+	err = redis.MainRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
 		AuthIDSetTokenField, string(token),
 		AuthIDSetTokenStaleDateTimeField, fmt.Sprintf("%d", staleDateTime.Unix()),
 		AuthIDSetTokenUseCounter, "0"))
@@ -411,7 +425,7 @@ func GetToken(authID string) (AuthToken, error) {
 	res := AuthToken{}
 	authIDSet := AuthIDSetPrefix + authID
 	redisReply := make([]string, 3)
-	err := redis.MasterRedis.Do(radix.Cmd(&redisReply, "HMGET", authIDSet,
+	err := redis.MainRedis.Do(radix.Cmd(&redisReply, "HMGET", authIDSet,
 		AuthIDSetTokenField,
 		AuthIDSetTokenStaleDateTimeField,
 		AuthIDSetTokenUseCounter))
@@ -445,7 +459,7 @@ func IncrementTokenUses(authID string, newCount int) error {
 	// There is a race condition in which multiple threads can set/unset a counter depending
 	// on the speed of the verification. This could be solved by making the AuthIDSetTokenUseCounter it's
 	// own key in redis and WATCH MULT EXEC the set. (See Redis Transactions)
-	err := redis.MasterRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
+	err := redis.MainRedis.Do(radix.Cmd(nil, "HSET", authIDSet,
 		AuthIDSetTokenUseCounter, fmt.Sprintf("%d", newCount+1)))
 	if err != nil {
 		return err

@@ -18,7 +18,7 @@ const ZeromqHost string = "tcp://127.0.0.1"
 //// Global Variables | Singletons
 
 // ZeroMQ Context Reference -- Defined on Startup
-var MasterZeroMQ *zmq4.Context = nil
+var MainZeroMQ *zmq4.Context = nil
 
 // ZeroMQ Server Task. Starts ZeroMQ and Defines Context
 func StartZeroMqComms() (func(), error) {
@@ -27,7 +27,7 @@ func StartZeroMqComms() (func(), error) {
 		return nil, err
 	}
 
-	MasterZeroMQ = ctx
+	MainZeroMQ = ctx
 
 	return cleanUpZeroMq, nil
 }
@@ -37,7 +37,7 @@ func cleanUpZeroMq() {
 	log.Println("Terminating ZeroMQ!")
 
 	// This caused infinite loops on cleanup with some sockets
-	// err := MasterZeroMQ.Term()
+	// err := MainZeroMQ.Term()
 	// if err != nil {
 	// 	log.Fatalf("ZeroMQ Cannot Be Terminated! Error: %v\n", err)
 	// }

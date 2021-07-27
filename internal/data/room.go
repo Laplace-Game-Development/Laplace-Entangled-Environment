@@ -67,7 +67,7 @@ const ThrottleGames = false
 // Sets Atomic Counter for GameIDs. Error is returned if the Database
 // can't be reached.
 func StartRoomsSystem() (func(), error) {
-	err := redis.MasterRedis.Do(radix.Cmd(nil, "SETNX", GameAtomicCounter, "0"))
+	err := redis.MainRedis.Do(radix.Cmd(nil, "SETNX", GameAtomicCounter, "0"))
 	if err != nil {
 		return nil, err
 	}
@@ -145,11 +145,11 @@ func CreateGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 		gameID = StringIDFromNumbers(atomicClockValue)
 		metadata = GameMetadata{Id: gameID, Owner: header.UserID, CreatedAt: time.Now().UTC().Unix(), LastUsed: time.Now().UTC().Unix()}
 
-		err = redis.MasterRedis.Do(radix.Cmd(&success, "HSETNX", GameHashSetName, gameID, "{}"))
+		err = redis.MainRedis.Do(radix.Cmd(&success, "HSETNX", GameHashSetName, gameID, "{}"))
 		if err != nil {
 			return policy.RespWithError(err)
 		} else if success != 0 {
-			err = redis.MasterRedis.Do(radix.Cmd(&success, "HSET", OwnerHashSetName, header.UserID, gameID))
+			err = redis.MainRedis.Do(radix.Cmd(&success, "HSET", OwnerHashSetName, header.UserID, gameID))
 			if err != nil {
 				return policy.RespWithError(err)
 			} else if success == 0 {
@@ -161,14 +161,14 @@ func CreateGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 				return policy.RespWithError(err)
 			}
 
-			err = redis.MasterRedis.Do(radix.Cmd(&players, "SADD", PlayerSetPrefix+gameID, header.UserID))
+			err = redis.MainRedis.Do(radix.Cmd(&players, "SADD", PlayerSetPrefix+gameID, header.UserID))
 			if err != nil {
 				return policy.RespWithError(err)
 			} else if players != 1 {
 				return policy.RespWithError(errors.New("Failed to Add Player to Game!"))
 			}
 
-			err = redis.MasterRedis.Do(radix.Cmd(nil, "RPUSH", GameListName, gameID))
+			err = redis.MainRedis.Do(radix.Cmd(nil, "RPUSH", GameListName, gameID))
 			if err != nil {
 				return policy.RespWithError(err)
 			}
@@ -198,7 +198,7 @@ func CanCreateGame(authID string) (bool, error) {
 
 	// Find the number of games
 	// We could also use metadataHashSetName Here
-	err := redis.MasterRedis.Do(radix.Cmd(&games, "HLEN", GameHashSetName))
+	err := redis.MainRedis.Do(radix.Cmd(&games, "HLEN", GameHashSetName))
 	if err != nil {
 		return false, err
 	}
@@ -210,7 +210,7 @@ func CanCreateGame(authID string) (bool, error) {
 	}
 
 	// Check if user already has a game
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "HEXISTS", OwnerHashSetName, authID))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "HEXISTS", OwnerHashSetName, authID))
 	if err != nil {
 		// TODO Redirect to Get Game Info
 		return false, err
@@ -239,7 +239,7 @@ func JoinGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFacto
 	var success int
 	var numPlayers uint16
 
-	err = redis.MasterRedis.Do(radix.Cmd(&gameDataSerialized, "HGET", GameHashSetName, args.GameID))
+	err = redis.MainRedis.Do(radix.Cmd(&gameDataSerialized, "HGET", GameHashSetName, args.GameID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if gameDataSerialized == "" {
@@ -249,14 +249,14 @@ func JoinGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFacto
 		}
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "SADD", PlayerSetPrefix+args.GameID, header.UserID))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "SADD", PlayerSetPrefix+args.GameID, header.UserID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if success < 1 {
 		log.Printf("User Tried to Add Themselves More Than Once!\nGameID: %s\tPlayerID: %s\n", args.GameID, header.UserID)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+args.GameID))
+	err = redis.MainRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+args.GameID))
 	if err != nil {
 		log.Printf("Redis Error! Err %v\n", err)
 	}
@@ -287,7 +287,7 @@ func LeaveGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFact
 	var numPlayers uint16
 	var diff uint16
 
-	err = redis.MasterRedis.Do(radix.Cmd(&doesGameExist, "HEXISTS", GameHashSetName, args.GameID))
+	err = redis.MainRedis.Do(radix.Cmd(&doesGameExist, "HEXISTS", GameHashSetName, args.GameID))
 	if err != nil {
 		return policy.RespWithError(err)
 	}
@@ -296,12 +296,12 @@ func LeaveGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFact
 		return policy.UnSuccessfulResponse("Game Does Not Exist!")
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+args.GameID))
+	err = redis.MainRedis.Do(radix.Cmd(&numPlayers, "SCARD", PlayerSetPrefix+args.GameID))
 	if err != nil {
 		return policy.RespWithError(err)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&diff, "SREM", PlayerSetPrefix+args.GameID, header.UserID))
+	err = redis.MainRedis.Do(radix.Cmd(&diff, "SREM", PlayerSetPrefix+args.GameID, header.UserID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if diff == 0 {
@@ -324,7 +324,7 @@ func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 
 	// TODO This should be done with Pipelining!!!
 	var gameID string
-	err = redis.MasterRedis.Do(radix.Cmd(&gameID, "HGET", OwnerHashSetName, header.UserID))
+	err = redis.MainRedis.Do(radix.Cmd(&gameID, "HGET", OwnerHashSetName, header.UserID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if gameID == "" {
@@ -332,14 +332,14 @@ func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 	}
 
 	var success int
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "HDEL", GameHashSetName, gameID))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "HDEL", GameHashSetName, gameID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if success == 0 {
 		return policy.RespWithError(err)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&success, "DEL", MetadataSetPrefix+gameID))
+	err = redis.MainRedis.Do(radix.Cmd(&success, "DEL", MetadataSetPrefix+gameID))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if success == 0 {
@@ -347,14 +347,14 @@ func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 	}
 
 	var count int
-	err = redis.MasterRedis.Do(radix.Cmd(&count, "SUNIONSTORE", PlayerSetPrefix+gameID, EmptyName))
+	err = redis.MainRedis.Do(radix.Cmd(&count, "SUNIONSTORE", PlayerSetPrefix+gameID, EmptyName))
 	if err != nil {
 		return policy.RespWithError(err)
 	} else if count > 0 {
 		log.Println("Failed to Remove Players at:  " + PlayerSetPrefix + gameID)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(nil, "HDEL", OwnerHashSetName, header.UserID))
+	err = redis.MainRedis.Do(radix.Cmd(nil, "HDEL", OwnerHashSetName, header.UserID))
 	if err != nil {
 		return policy.RespWithError(err)
 	}
@@ -373,7 +373,7 @@ func DeleteGame(header policy.RequestHeader, bodyFactories policy.RequestBodyFac
 func GetRoomHealth(gameID string) (time.Time, error) {
 	var lastUpdate string
 
-	err := redis.MasterRedis.Do(radix.Cmd(&lastUpdate, "HGET", MetadataSetPrefix+gameID, MetadataSetLastUsed))
+	err := redis.MainRedis.Do(radix.Cmd(&lastUpdate, "HGET", MetadataSetPrefix+gameID, MetadataSetLastUsed))
 	if err != nil {
 		return time.Now().UTC(), err
 	} else if len(lastUpdate) <= 0 {
@@ -394,7 +394,7 @@ func GetRoomHealth(gameID string) (time.Time, error) {
 //         -> error :: non-nil if unable to read game metadata
 func IsUserInGame(userID string, gameID string) (bool, error) {
 	var isInGame int
-	err := redis.MasterRedis.Do(radix.Cmd(&isInGame, "SISMEMBER", PlayerSetPrefix+gameID, userID))
+	err := redis.MainRedis.Do(radix.Cmd(&isInGame, "SISMEMBER", PlayerSetPrefix+gameID, userID))
 	if err != nil {
 		return false, err
 	}
@@ -437,7 +437,7 @@ func StringIDFromNumbers(counter int64) string {
 // metadata :: New Metadata Value
 //    (overwrites the id at metadata.id)
 func SetGameMetadata(metadata GameMetadata) error {
-	return redis.MasterRedis.Do(radix.Cmd(nil, "HSET", MetadataSetPrefix+metadata.Id,
+	return redis.MainRedis.Do(radix.Cmd(nil, "HSET", MetadataSetPrefix+metadata.Id,
 		MetadataSetOwner, metadata.Owner,
 		MetadataSetCreatedAt, fmt.Sprintf("%d", metadata.CreatedAt),
 		MetadataSetLastUsed, fmt.Sprintf("%d", metadata.LastUsed)))
@@ -449,7 +449,7 @@ func SetGameMetadata(metadata GameMetadata) error {
 func GetGameMetadata(gameID string) (GameMetadata, error) {
 	fields := make([]string, 3)
 
-	err := redis.MasterRedis.Do(radix.Cmd(&fields, "HMGET", MetadataSetPrefix+gameID,
+	err := redis.MainRedis.Do(radix.Cmd(&fields, "HMGET", MetadataSetPrefix+gameID,
 		MetadataSetOwner,
 		MetadataSetCreatedAt,
 		MetadataSetLastUsed))
@@ -480,14 +480,14 @@ func IncrementCounterAndGetValue(keyName string) (int64, error) {
 
 	for true {
 		// Why does Overflow have to result in an error?!!! Why Redis Why!!!!
-		err := redis.MasterRedis.Do(radix.Cmd(&result, "INCR", keyName))
+		err := redis.MainRedis.Do(radix.Cmd(&result, "INCR", keyName))
 		if err != nil && err.Error() == "ERR increment or decrement would overflow" {
 			time.Sleep(time.Microsecond * 5)
 			continue
 		} else if err != nil {
 			return 0, err
 		} else if result == 9223372036854775807 {
-			err = redis.MasterRedis.Do(radix.Cmd(nil, "DEL", keyName))
+			err = redis.MainRedis.Do(radix.Cmd(nil, "DEL", keyName))
 			if err != nil {
 				return 0, err
 			}

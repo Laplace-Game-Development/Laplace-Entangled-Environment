@@ -40,7 +40,7 @@ func testUnitTestTask(t *testing.T) {
 	}
 
 	// Delete Key In case of previous failed run attempts
-	redis.MasterRedis.Do(radix.Cmd(nil, "DEL", unitTestTableName))
+	redis.MainRedis.Do(radix.Cmd(nil, "DEL", unitTestTableName))
 
 	SendTasksToWorkers(msgs...)
 
@@ -48,7 +48,7 @@ func testUnitTestTask(t *testing.T) {
 	time.Sleep(waitTime)
 
 	var uniqueMsgs []string
-	redis.MasterRedis.Do(radix.Cmd(&uniqueMsgs, "SMEMBERS", unitTestTableName))
+	redis.MainRedis.Do(radix.Cmd(&uniqueMsgs, "SMEMBERS", unitTestTableName))
 	t.Logf("Got Members! Msgs: %v\n", uniqueMsgs)
 
 	var value bool
@@ -64,11 +64,11 @@ func testUnitTestTask(t *testing.T) {
 
 	actual := len(set)
 	var expected int
-	redis.MasterRedis.Do(radix.Cmd(&expected, "SCARD", unitTestTableName))
+	redis.MainRedis.Do(radix.Cmd(&expected, "SCARD", unitTestTableName))
 	if actual != expected {
 		t.Error("Did not get all keys expected for Task Working... Consider Increasing Sleep Period!")
 	}
 
 	// Delete Key When Finished
-	redis.MasterRedis.Do(radix.Cmd(nil, "DEL", unitTestTableName))
+	redis.MainRedis.Do(radix.Cmd(nil, "DEL", unitTestTableName))
 }

@@ -70,7 +70,7 @@ func TestBase64Decode(t *testing.T) {
 	base64.StdEncoding.Encode(encoded, []byte(fooey))
 	t.Logf("Encoded base64 %s\n", encoded)
 
-	fooeyAssert, err := base64Decode(&encoded)
+	fooeyAssert, err := util.Base64Decode(&encoded)
 	if err != nil {
 		t.Errorf("Error parsing/unmarshalling dummy bytes! Err: %v\n", err)
 	}
@@ -163,7 +163,7 @@ func TestParseAttachmentBody(t *testing.T) {
 	}
 
 	marshalledSlice := marshalled[bodyStart:]
-	prefix := TCPRequestPrefix{NeedsSecurity: false, IsBase64Enc: false, IsJSON: true}
+	prefix := TCPRequestPrefix{IsBase64Enc: false, IsJSON: true}
 	err = parseBody(&fooeyAssert, prefix, &marshalledSlice)
 	if err != nil {
 		t.Errorf("Error Parsing Body! Err: %v\n", err)

@@ -3,7 +3,6 @@ package route
 import (
 	"bytes"
 	"encoding/asn1"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -74,7 +73,7 @@ func parseRequestAttachment(isJSON bool, data *[]byte) (policy.RequestAttachment
 func parseBody(ptr interface{}, prefix TCPRequestPrefix, body *[]byte) error {
 	var err error
 	if prefix.IsBase64Enc {
-		*body, err = base64Decode(body)
+		*body, err = util.Base64Decode(body)
 		if err != nil {
 			return err
 		}
@@ -168,16 +167,6 @@ func switchOnCommand(header policy.RequestHeader, bodyFactories policy.RequestBo
 //// Utility Encoding Functions
 ////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-
-// Decodes the data byte slice from base64 and returns a new byte slice representing the data.
-//
-// data :: base64 encoded data
-// returns -> copy of the data which is base64 decoded
-func base64Decode(data *[]byte) ([]byte, error) {
-	res := make([]byte, base64.StdEncoding.DecodedLen(len(*data)))
-	_, err := base64.StdEncoding.Decode(res, *data)
-	return res, err
-}
 
 // Decodes the data byte slice from JSON using policy.RequestAttachment. It
 // then returns the structure for authentication purposes

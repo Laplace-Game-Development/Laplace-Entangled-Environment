@@ -49,7 +49,7 @@ var mapPrefixToWork map[string]func([]string) error = map[string]func([]string) 
     which load the required data to call a function in the event module. These
     are called and used by workers.
 
-var masterCron *cron.Cron = nil
+var mainCronInst *cron.Cron = nil
     Cron scheduling reference. This should only be used by this module. if you
     want to dynamically schedule (for whatever reason) use this
 

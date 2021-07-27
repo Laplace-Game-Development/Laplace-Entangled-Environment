@@ -39,7 +39,7 @@ func TestEvent(t *testing.T) {
 	}
 
 	var actual string
-	err = redis.MasterRedis.Do(radix.Cmd(&actual, "LINDEX", HealthTaskQueue, "-1"))
+	err = redis.MainRedis.Do(radix.Cmd(&actual, "LINDEX", HealthTaskQueue, "-1"))
 	if err != nil {
 		t.Errorf("An Error Occurred When Reading From Redis! Err: %v\n", err)
 	}
@@ -48,7 +48,7 @@ func TestEvent(t *testing.T) {
 		t.Errorf("Expected '%s' but got '%s'!\n", expected, actual)
 	}
 
-	err = redis.MasterRedis.Do(radix.Cmd(&actual, "RPOP", HealthTaskQueue))
+	err = redis.MainRedis.Do(radix.Cmd(&actual, "RPOP", HealthTaskQueue))
 	if err != nil {
 		t.Errorf("An Error Occurred When Reading From Redis! Err: %v\n", err)
 	}

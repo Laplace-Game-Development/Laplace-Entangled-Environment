@@ -10,6 +10,7 @@ package route
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
@@ -38,6 +39,9 @@ const ListeningTCPIpAddress string = "127.0.0.1"
 // TCP Port number to listen for connections on
 const ListeningTCPPortNumber string = ":26005"
 
+// SSL Port Number to Listen for connections on
+const ListeningSSLPortNumber string = ":26006"
+
 // Size of Packet Header for TCP commands
 // Byte 1 :: Metadata/Parsing info
 // Byte 2 :: More Significant byte for Command
@@ -46,7 +50,11 @@ const CommandBytes = 3
 
 // Limit of Goroutines used for listening on TCP.
 // 5 is a good number for testing, but a better number would be much higher.
-const NumberOfTCPThreads = 5
+const NumberOfTCPThreads = 10
+
+// Limit of Goroutines used for listening on SSL.
+// 5 is a good number for testing, but a better number would be much higher.
+const NumberOfSSLThreads = 5
 
 // Constant byte string of JSON representing a data malformed error
 // May be moved to Policy
@@ -68,23 +76,29 @@ var SecureConnectionMsgLen int = len([]byte("{\"success\": true, \"message\": \"
 const HttpHost string = "127.0.0.1"
 
 // HTTP Host Listening Port Number
-const HttpPort string = ":8080"
+const HttpPort string = ":80"
 
 //// Global Variables | Singletons
 
 // Thread Pool for Connection Listening. This stores the threads and context
 // for all listening for connections.
 // The goroutines themselves will spawn other goroutines so we use more than
-// 3 "threads" for the full application.
+// 4 "threads" for the full application.
 //
 // 1 for TCP
+// 1 for SSL
 // 1 For HTTP
 // 1 For WebSocket?
-var listenerThreadPool util.ThreadPool = util.NewThreadPool(3)
+var listenerThreadPool util.ThreadPool = util.NewThreadPool(4)
 
 // ServerTask Startup Function for Conneciton Listening. Takes care of initialization.
 func StartListener() (func(), error) {
 	err := listenerThreadPool.SubmitFuncUnsafe(startTCPListening)
+	if err != nil {
+		return nil, err
+	}
+
+	err = listenerThreadPool.SubmitFuncUnsafe(startSSLListening)
 	if err != nil {
 		return nil, err
 	}
@@ -337,9 +351,8 @@ type TCPClientConn struct {
 // First byte of a TCP request. This is a struct of booleans
 // about how the request is structured over TCP.
 type TCPRequestPrefix struct {
-	NeedsSecurity bool // First Most Sig Bit
-	IsBase64Enc   bool // Second Most Sig Bit
-	IsJSON        bool // Third Most Sig Bit
+	IsBase64Enc bool // First Most Sig Bit
+	IsJSON      bool // Second Most Sig Bit
 }
 
 // Creates TCP Connection Listener(s) with a designated threadpool and addressing.
@@ -372,6 +385,39 @@ func startTCPListening(ctx context.Context) {
 		}
 		pool.SubmitFuncBlock(func(ctx context.Context) {
 			handleTCPConnection(ctx, TCPClientConn{conn: conn, isSecured: false, isReadNeeded: false})
+		})
+	}
+}
+
+// Creates SSL Connection Listener(s) with a designated threadpool and addressing.
+// See "startTCPListening"
+//
+// ctx :: Owning Context
+func startSSLListening(ctx context.Context) {
+	log.Println("SSL Listening on " + ListeningTCPIpAddress + ListeningSSLPortNumber + "!")
+	ln, err := tls.Listen("tcp", ListeningTCPIpAddress+ListeningSSLPortNumber, &tlsConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	pool := util.NewThreadPoolWithContext(NumberOfSSLThreads, ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// SYN + ACK
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Println("Error Occurred In SSL Handshake!")
+			log.Println(err)
+			continue
+		}
+		pool.SubmitFuncBlock(func(ctx context.Context) {
+			handleTCPConnection(ctx, TCPClientConn{conn: conn, isSecured: true, isReadNeeded: false})
 		})
 	}
 }
@@ -443,20 +489,7 @@ func readAndRespondTCP(clientConn TCPClientConn, dataIn *[]byte) bool {
 		return false
 	}
 
-	returnWithoutRequest, err := SecureTCPConnIfNeeded(&clientConn, prefix)
-	if err != nil {
-		log.Printf("Error checking for connection security! Err: %s\n", err)
-		return false
-	} else if returnWithoutRequest {
-		clientConn.conn.SetWriteDeadline(time.Now().Add(IoDeadline))
-		err = writeTCPResponse(clientConn, &SecureConnectionMsg, SecureConnectionMsgLen)
-		if err != nil {
-			log.Printf("Error Securing Request! Err: %s\n", err)
-		}
-		return true
-	}
-
-	header, bodyFactory, err := generateRequestFromTCP(n, dataIn, prefix)
+	header, bodyFactory, err := generateRequestFromSocket(n, dataIn, prefix)
 	if err != nil {
 		log.Printf("Error Generating Request Command Payloads! Err: %s\n", err)
 		clientConn.conn.SetWriteDeadline(time.Now().Add(IoDeadline))
@@ -496,9 +529,8 @@ func parseTCPPrefix(length int, data *[]byte) (TCPRequestPrefix, error) {
 	firstByte := (*data)[0]
 
 	prefix := TCPRequestPrefix{
-		NeedsSecurity: (firstByte & 0b1000_0000) != 0,
-		IsBase64Enc:   (firstByte & 0b0100_0000) != 0,
-		IsJSON:        (firstByte & 0b0001_0000) != 0,
+		IsBase64Enc: (firstByte & 0b1000_0000) != 0,
+		IsJSON:      (firstByte & 0b0100_0000) != 0,
 	}
 
 	return prefix, nil
@@ -518,7 +550,7 @@ func parseTCPPrefix(length int, data *[]byte) (TCPRequestPrefix, error) {
 //      RequestBodyFactories ::	Transform functions for getting request arguments
 //      error :: If parsing goes wrong and the request is illformed an error is returned
 // }
-func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (policy.RequestHeader, policy.RequestBodyFactories, error) {
+func generateRequestFromSocket(length int, data *[]byte, prefix TCPRequestPrefix) (policy.RequestHeader, policy.RequestBodyFactories, error) {
 	header := policy.RequestHeader{}
 	factories := policy.RequestBodyFactories{}
 
@@ -535,7 +567,8 @@ func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (
 	header.Command = cmd
 
 	// Add Attachment to Header
-	bodyAttachmentAndPayload := (*data)[3:]
+	// Also Snip Off Trailing Characters
+	bodyAttachmentAndPayload := (*data)[3:length]
 	attachment, bodyStart, err := parseRequestAttachment(prefix.IsJSON, &bodyAttachmentAndPayload)
 	if err != nil {
 		return header, factories, err
@@ -559,9 +592,8 @@ func generateRequestFromTCP(length int, data *[]byte, prefix TCPRequestPrefix) (
 //
 // clientConn :: Metadata and reference to TCP Connection
 //
-// returns -> bool
-//            true | keep the connection alive
-//           false | close the connection
+// returns -> true | keep the connection alive OR
+// false | close the connection
 func computeTCPKeepAlive(clientConn TCPClientConn) bool {
 	// Add Logic for Connection Overhead
 	return clientConn.isReadNeeded

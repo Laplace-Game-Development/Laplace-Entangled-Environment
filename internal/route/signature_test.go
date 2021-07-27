@@ -1,9 +1,7 @@
 package route
 
 import (
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/Laplace-Game-Development/Laplace-Entangled-Environment/internal/data"
@@ -50,7 +48,11 @@ func TestSigVerify(t *testing.T) {
 		t.Errorf("Failure to Login user! Err: %v\n", err)
 	}
 
-	token := response.Raw
+	token, err := util.Base64Decode(&response.Raw)
+	if err != nil {
+		t.Errorf("Base64 Did Not Decode Correctly! Err: %v\n", err)
+	}
+	t.Logf("Token Received: %X\n", token)
 	counter := 0
 
 	// Get User ID
@@ -78,7 +80,7 @@ func TestSigVerify(t *testing.T) {
 	// Test Verification
 	content := "derp1234!@#$"
 	contentByte := []byte(content)
-	signature := helperGenSig(&token, content, counter)
+	signature := TestHelperGenSig(&token, content, counter)
 	// Remember, each success increments counter!
 	err = SigVerification(authResponse.AuthID, signature, &contentByte)
 	if err != nil {
@@ -87,7 +89,7 @@ func TestSigVerify(t *testing.T) {
 
 	counter += 1
 
-	signature = helperGenSig(&token, content, counter)
+	signature = TestHelperGenSig(&token, content, counter)
 	err = SigVerification(authResponse.AuthID, signature, &contentByte)
 	if err != nil {
 		t.Errorf("Error Verifying Signature! Err: %v\n", err)
@@ -95,7 +97,7 @@ func TestSigVerify(t *testing.T) {
 
 	counter += 1
 
-	signature = helperGenSig(&token, content, counter)
+	signature = TestHelperGenSig(&token, content, counter)
 	err = SigVerification(authResponse.AuthID, signature, &contentByte)
 	if err != nil {
 		t.Errorf("Error Verifying Signature! Err: %v\n", err)
@@ -103,14 +105,14 @@ func TestSigVerify(t *testing.T) {
 
 	counter += 1
 
-	signature = helperGenSig(&token, content, counter)
+	signature = TestHelperGenSig(&token, content, counter)
 	err = SigVerification(authResponse.AuthID, signature, &contentByte)
 	if err != nil {
 		t.Errorf("Error Verifying Signature! Err: %v\n", err)
 	}
 
 	// Bad Signature Results in Error
-	signature = helperGenSig(&token, content, counter)
+	signature = TestHelperGenSig(&token, content, counter)
 	err = SigVerification(authResponse.AuthID, signature, &contentByte)
 	if err == nil {
 		t.Errorf("No Error In Verifying Bad Signature!")
@@ -129,34 +131,4 @@ func TestSigVerify(t *testing.T) {
 	} else if !success {
 		t.Errorf("User did not exist upon deletion!\n")
 	}
-}
-
-func helperGenSig(token *[]byte, content string, counter int) string {
-	counterString := fmt.Sprintf("%d", counter)
-
-	counterByte := []byte(counterString)
-	contentByte := []byte(content)
-
-	contentLen := len(contentByte)
-	tokenLen := len(*token)
-	counterLen := len(counterByte)
-
-	input := make([]byte, contentLen+tokenLen+counterLen)
-	err := util.Concat(&input, &contentByte, 0)
-	if err != nil {
-		return ""
-	}
-
-	err = util.Concat(&input, token, contentLen)
-	if err != nil {
-		return ""
-	}
-
-	err = util.Concat(&input, &counterByte, contentLen+tokenLen)
-	if err != nil {
-		return ""
-	}
-
-	checksumByte := sha256.Sum256(input)
-	return string(checksumByte[:])
 }
